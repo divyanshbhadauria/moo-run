@@ -86,6 +86,29 @@
     backdrop-filter: blur(4px);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
   }
+  #hearts {
+    background: var(--ui-bg);
+    padding: 6px 12px;
+    border-radius: 999px;
+    backdrop-filter: blur(4px);
+    margin-top: 6px;
+    display: inline-flex;
+    gap: 4px;
+    font-size: 22px;
+    line-height: 1;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+  #hearts .heart {
+    color: #ff5252;
+    text-shadow: 0 0 6px rgba(255, 82, 82, 0.4);
+    transition: opacity 200ms ease, color 200ms ease, transform 200ms ease;
+  }
+  #hearts .heart.lost {
+    opacity: 0.25;
+    color: #555;
+    transform: scale(0.85);
+    text-shadow: none;
+  }
   #playerTag {
     background: var(--ui-bg);
     padding: 8px 14px;
@@ -368,6 +391,11 @@
     <div id="hud">
       <div>
         <div id="score">0</div>
+        <div id="hearts">
+          <span class="heart">♥</span>
+          <span class="heart">♥</span>
+          <span class="heart">♥</span>
+        </div>
         <div id="playerTag" style="display:none;">
           <span class="dot" id="playerDot"></span>
           <span id="playerName"></span>
@@ -468,6 +496,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
   const camEl       = document.getElementById('cam');
   const canvas      = document.getElementById('game');
   const scoreEl     = document.getElementById('score');
+  const heartEls    = () => document.querySelectorAll('#hearts .heart');
   const pitchBarEl  = document.getElementById('pitchBar');
   const pitchHzEl   = document.getElementById('pitchHz');
   const pitchLblEl  = document.getElementById('pitchLabel');
@@ -548,6 +577,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
   const STATE = { INTRO: 0, PLAY: 1, HIT: 2, OVER: 3 };
   let state = STATE.INTRO;
 
+  const MAX_LIVES = 3;
   const game = {
     speed: 0.35,
     obstacles: [],
@@ -557,7 +587,10 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
     elapsed: 0,
     cowColorKey: 'classic',
     username: '',
-    hitTime: 0, // seconds since collision flash started
+    hitTime: 0,        // seconds since the fatal-hit flash started
+    lives: MAX_LIVES,
+    flashUntil: 0,     // game.elapsed value below which cow pulses red after a non-fatal hit
+    invulnUntil: 0,    // game.elapsed value below which collisions are ignored
     cow: {
       jumping: false, jumpTime: 0,
       ducking: false, duckTime: 0,
@@ -772,25 +805,36 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
     const snoutMat = new THREE.MeshLambertMaterial({ color: 0xf2c4ae });
     const flashMaterials = [bodyMat, tailMat];
 
-    // Body — stretched sphere, slightly squashed vertically.
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.30, 24, 18), bodyMat);
-    body.scale.set(1.05, 0.85, 1.50);
-    body.position.y = 0.58;
+    // Body — chunky, barrel-shaped. Wider, taller, and a touch shorter than before.
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.34, 28, 20), bodyMat);
+    body.scale.set(1.20, 1.00, 1.50);
+    body.position.y = 0.62;
     grp.add(body);
+    // Belly underplate — softens the silhouette where the legs meet the torso.
+    const belly = new THREE.Mesh(new THREE.SphereGeometry(0.30, 20, 14), bodyMat);
+    belly.scale.set(1.05, 0.55, 1.30);
+    belly.position.y = 0.40;
+    grp.add(belly);
+    // Shoulder hump — gives the cow a beefier silhouette from behind.
+    const hump = new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 12), bodyMat);
+    hump.scale.set(1.1, 0.7, 0.9);
+    hump.position.set(0, 0.92, -0.18);
+    grp.add(hump);
 
-    // Spots — flattened ellipsoids that sit on the body surface.
+    // Spots — ellipsoid blobs nestled on the body surface.
     if (palette.spot) {
       const spotMat = new THREE.MeshLambertMaterial({ color: palette.spot });
       flashMaterials.push(spotMat);
       // [x, y, z, scaleX, scaleY, scaleZ]
       const spots = [
-        [-0.26, 0.62,  0.05, 0.45, 0.40, 0.55],   // left rear flank
-        [ 0.27, 0.50, -0.10, 0.50, 0.45, 0.55],   // right side
-        [-0.05, 0.78,  0.18, 0.60, 0.30, 0.55],   // top-back
-        [ 0.10, 0.78, -0.20, 0.50, 0.30, 0.50],   // top-front
-        [ 0.04, 0.55,  0.36, 0.40, 0.40, 0.30],   // rump
+        [-0.32, 0.62,  0.10, 0.55, 0.55, 0.65],  // left rear flank
+        [ 0.32, 0.55, -0.05, 0.55, 0.55, 0.65],  // right side
+        [-0.10, 0.86,  0.20, 0.70, 0.40, 0.65],  // top-back
+        [ 0.14, 0.86, -0.18, 0.55, 0.40, 0.55],  // top-front
+        [ 0.05, 0.55,  0.42, 0.50, 0.50, 0.40],  // rump
+        [-0.22, 0.42,  0.30, 0.45, 0.40, 0.50],  // hip-blob
       ];
-      const baseSpot = new THREE.SphereGeometry(0.16, 16, 12);
+      const baseSpot = new THREE.SphereGeometry(0.18, 16, 12);
       for (const [x, y, z, sx, sy, sz] of spots) {
         const s = new THREE.Mesh(baseSpot, spotMat);
         s.position.set(x, y, z);
@@ -799,62 +843,72 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
       }
     }
 
-    // Head — rounded, slightly oval.
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 20, 16), bodyMat);
-    head.scale.set(1.0, 0.95, 1.05);
-    head.position.set(0, 0.80, -0.55);
+    // Head — bigger and rounder.
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 22, 18), bodyMat);
+    head.scale.set(1.05, 1.00, 1.10);
+    head.position.set(0, 0.88, -0.62);
     grp.add(head);
 
-    // Snout — soft little muzzle pushed forward.
-    const snout = new THREE.Mesh(new THREE.SphereGeometry(0.14, 16, 12), snoutMat);
-    snout.scale.set(1.0, 0.85, 0.75);
-    snout.position.set(0, 0.69, -0.78);
+    // Snout — prominent oval muzzle, clearly stuck out forward.
+    const snout = new THREE.Mesh(new THREE.SphereGeometry(0.18, 18, 14), snoutMat);
+    snout.scale.set(1.10, 0.95, 0.95);
+    snout.position.set(0, 0.74, -0.92);
     grp.add(snout);
-    // Two nostrils (tiny dark dots) for personality.
-    const nostrilGeom = new THREE.SphereGeometry(0.018, 8, 8);
-    const nL = new THREE.Mesh(nostrilGeom, eyeMat); nL.position.set(-0.04, 0.69, -0.88);
-    const nR = new THREE.Mesh(nostrilGeom, eyeMat); nR.position.set( 0.04, 0.69, -0.88);
+    // Mouth line — flat dark sphere across the front of the snout.
+    const mouth = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), eyeMat);
+    mouth.scale.set(1.4, 0.35, 0.5);
+    mouth.position.set(0, 0.66, -1.04);
+    grp.add(mouth);
+    // Nostrils
+    const nostrilGeom = new THREE.SphereGeometry(0.022, 8, 8);
+    const nL = new THREE.Mesh(nostrilGeom, eyeMat); nL.position.set(-0.05, 0.78, -1.06);
+    const nR = new THREE.Mesh(nostrilGeom, eyeMat); nR.position.set( 0.05, 0.78, -1.06);
     grp.add(nL, nR);
 
-    // Eyes
-    const eyeGeom = new THREE.SphereGeometry(0.04, 10, 8);
-    const eyeL = new THREE.Mesh(eyeGeom, eyeMat); eyeL.position.set(-0.10, 0.86, -0.72);
-    const eyeR = new THREE.Mesh(eyeGeom, eyeMat); eyeR.position.set( 0.10, 0.86, -0.72);
+    // Eyes (with white sclera for personality)
+    const scleraGeom = new THREE.SphereGeometry(0.06, 12, 10);
+    const scleraMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    const eyeWL = new THREE.Mesh(scleraGeom, scleraMat); eyeWL.position.set(-0.12, 0.96, -0.78);
+    const eyeWR = new THREE.Mesh(scleraGeom, scleraMat); eyeWR.position.set( 0.12, 0.96, -0.78);
+    grp.add(eyeWL, eyeWR);
+    const pupilGeom = new THREE.SphereGeometry(0.035, 10, 8);
+    const eyeL = new THREE.Mesh(pupilGeom, eyeMat); eyeL.position.set(-0.12, 0.96, -0.83);
+    const eyeR = new THREE.Mesh(pupilGeom, eyeMat); eyeR.position.set( 0.12, 0.96, -0.83);
     grp.add(eyeL, eyeR);
 
-    // Ears — flattened spheres tilted outward.
-    const earGeom = new THREE.SphereGeometry(0.10, 12, 10);
+    // Ears — flattened, droopy.
+    const earGeom = new THREE.SphereGeometry(0.13, 14, 10);
     const earL = new THREE.Mesh(earGeom, bodyMat);
-    earL.position.set(-0.22, 0.92, -0.52); earL.scale.set(1.4, 0.55, 0.85); earL.rotation.z = 0.55;
+    earL.position.set(-0.26, 1.00, -0.58); earL.scale.set(1.5, 0.50, 0.95); earL.rotation.z = 0.65;
     const earR = new THREE.Mesh(earGeom, bodyMat);
-    earR.position.set( 0.22, 0.92, -0.52); earR.scale.set(1.4, 0.55, 0.85); earR.rotation.z = -0.55;
+    earR.position.set( 0.26, 1.00, -0.58); earR.scale.set(1.5, 0.50, 0.95); earR.rotation.z = -0.65;
     grp.add(earL, earR);
 
-    // Horns — tapered cylinders with rounded sphere tips.
-    const hornGeom = new THREE.CylinderGeometry(0.020, 0.045, 0.18, 10);
-    const hornTipGeom = new THREE.SphereGeometry(0.022, 8, 6);
+    // Horns — tapered with sphere tips.
+    const hornGeom = new THREE.CylinderGeometry(0.022, 0.05, 0.20, 12);
+    const hornTipGeom = new THREE.SphereGeometry(0.026, 10, 8);
     const hornL = new THREE.Mesh(hornGeom, hornMat);
-    hornL.position.set(-0.12, 1.02, -0.55); hornL.rotation.z = 0.35;
+    hornL.position.set(-0.13, 1.12, -0.62); hornL.rotation.z = 0.35;
     const hornR = new THREE.Mesh(hornGeom, hornMat);
-    hornR.position.set( 0.12, 1.02, -0.55); hornR.rotation.z = -0.35;
+    hornR.position.set( 0.13, 1.12, -0.62); hornR.rotation.z = -0.35;
     const hornTL = new THREE.Mesh(hornTipGeom, hornMat);
-    hornTL.position.set(-0.16, 1.10, -0.55);
+    hornTL.position.set(-0.18, 1.20, -0.62);
     const hornTR = new THREE.Mesh(hornTipGeom, hornMat);
-    hornTR.position.set( 0.16, 1.10, -0.55);
+    hornTR.position.set( 0.18, 1.20, -0.62);
     grp.add(hornL, hornR, hornTL, hornTR);
 
-    // Legs — capsules pivoted at the shoulder/hip so they swing as one piece.
+    // Legs — chunkier capsules pivoted at the shoulder/hip.
     const legs = [];
     const legPositions = [
-      [-0.17,  0.28],  // back-left
-      [ 0.17,  0.28],  // back-right
-      [-0.17, -0.28],  // front-left
-      [ 0.17, -0.28],  // front-right
+      [-0.20,  0.32],  // back-left
+      [ 0.20,  0.32],  // back-right
+      [-0.20, -0.30],  // front-left
+      [ 0.20, -0.30],  // front-right
     ];
     const legGeom = THREE.CapsuleGeometry
-      ? new THREE.CapsuleGeometry(0.07, 0.30, 6, 12)
-      : new THREE.CylinderGeometry(0.07, 0.07, 0.44, 12);
-    const hoofGeom = new THREE.SphereGeometry(0.085, 12, 10);
+      ? new THREE.CapsuleGeometry(0.085, 0.30, 6, 14)
+      : new THREE.CylinderGeometry(0.085, 0.085, 0.47, 14);
+    const hoofGeom = new THREE.SphereGeometry(0.105, 14, 10);
     for (const [x, z] of legPositions) {
       const pivot = new THREE.Group();
       pivot.position.set(x, 0.46, z);
@@ -863,23 +917,32 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
       pivot.add(leg);
       const hoof = new THREE.Mesh(hoofGeom, hoofMat);
       hoof.position.y = -0.44;
-      hoof.scale.set(1.0, 0.55, 1.0);
+      hoof.scale.set(1.0, 0.50, 1.0);
       pivot.add(hoof);
       grp.add(pivot);
       legs.push(pivot);
     }
 
-    // Tail — slim capsule with a sphere tuft.
+    // Tail — capsule trunk with a fluffy multi-sphere tuft at the tip.
     const tailGeom = THREE.CapsuleGeometry
-      ? new THREE.CapsuleGeometry(0.022, 0.28, 4, 8)
-      : new THREE.CylinderGeometry(0.022, 0.022, 0.32, 8);
+      ? new THREE.CapsuleGeometry(0.028, 0.30, 4, 8)
+      : new THREE.CylinderGeometry(0.028, 0.028, 0.36, 8);
     const tail = new THREE.Mesh(tailGeom, tailMat);
-    tail.position.set(0, 0.62, 0.46);
-    tail.rotation.x = 0.5;
+    tail.position.set(0, 0.66, 0.55);
+    tail.rotation.x = 0.55;
     grp.add(tail);
-    const tailTip = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 10), tailMat);
-    tailTip.position.set(0, 0.46, 0.60);
-    grp.add(tailTip);
+    // Fluffy tuft — three overlapping spheres for a fuzzy silhouette.
+    const tuftGeom = new THREE.SphereGeometry(0.075, 12, 10);
+    const tuftPositions = [
+      [0,    0.46, 0.74],
+      [0.05, 0.49, 0.70],
+      [-0.05,0.43, 0.70],
+    ];
+    for (const [x, y, z] of tuftPositions) {
+      const t = new THREE.Mesh(tuftGeom, tailMat);
+      t.position.set(x, y, z);
+      grp.add(t);
+    }
 
     return { group: grp, legs, flashMaterials };
   }
@@ -913,7 +976,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
       brace.rotation.z = 0.05;
       grp.add(brace);
     } else {
-      const postH = 2.0;
+      const postH = 1.35;
+      const railY = 1.10;
       const postGeom = new THREE.BoxGeometry(0.12, postH, 0.12);
       const postL = new THREE.Mesh(postGeom, woodMat);
       postL.position.set(-WORLD.trackHalfW + 0.10, postH / 2, 0);
@@ -921,15 +985,15 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
       postR.position.set( WORLD.trackHalfW - 0.10, postH / 2, 0);
       grp.add(postL, postR);
       const rail = new THREE.Mesh(
-        new THREE.BoxGeometry(WORLD.trackHalfW * 2 - 0.30, 0.14, 0.12),
+        new THREE.BoxGeometry(WORLD.trackHalfW * 2 - 0.30, 0.12, 0.12),
         railMat
       );
-      rail.position.set(0, 1.7, 0);
+      rail.position.set(0, railY, 0);
       grp.add(rail);
       // little flag so it reads as the duck-under variant
       const flagMat = new THREE.MeshLambertMaterial({ color: 0x82b1ff });
-      const flag = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.14, 0.02), flagMat);
-      flag.position.set(0, 1.88, 0);
+      const flag = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.12, 0.02), flagMat);
+      flag.position.set(0, postH + 0.08, 0);
       grp.add(flag);
     }
     return grp;
@@ -996,11 +1060,19 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
       if (mesh) mesh.position.z = obstacleWorldZ(o.z);
     }
 
-    // Collision flash — pulse the cow's body materials' emissive red.
-    const flashing = state === STATE.HIT;
-    const amt = flashing ? (0.4 + 0.4 * Math.sin(game.hitTime * 25)) : 0;
+    // Collision flash — pulse cow materials red on hits, fatal or not.
+    const fatalFlash = state === STATE.HIT;
+    const recoverFlash = !fatalFlash && game.elapsed < game.flashUntil;
+    let amt = 0;
+    if (fatalFlash)        amt = 0.4 + 0.4 * Math.sin(game.hitTime * 25);
+    else if (recoverFlash) amt = 0.5 + 0.4 * Math.sin(game.elapsed * 30);
     for (const mat of cowMaterials) {
       if (mat.emissive) mat.emissive.setRGB(amt, 0, 0);
+    }
+    // Blink the cow during invulnerability so the player knows they're safe.
+    if (cowGroup && !fatalFlash) {
+      const invuln = game.elapsed < game.invulnUntil;
+      cowGroup.visible = invuln ? (Math.floor(game.elapsed * 18) % 2 === 0) : true;
     }
   }
 
@@ -1074,8 +1146,12 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
           game.score++;
           scoreEl.textContent = game.score;
         } else if (o.z < TRACK.cowZ - 0.02) {
-          triggerCollision();
-          return;
+          if (game.elapsed < game.invulnUntil) {
+            o.cleared = true;  // already paying for the recent hit; let this one pass
+          } else {
+            triggerCollision(o);
+            if (state !== STATE.PLAY) return;
+          }
         }
       }
     }
@@ -1086,12 +1162,23 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
     });
   }
 
-  function triggerCollision() {
-    state = STATE.HIT;
-    game.hitTime = 0;
-    // stop the cow's jump/duck so the red flash reads clearly
+  function triggerCollision(o) {
+    if (o) o.cleared = true;
+    game.lives = Math.max(0, game.lives - 1);
+    updateHeartsHUD();
+    game.flashUntil = game.elapsed + 0.5;
+    game.invulnUntil = game.elapsed + 1.1;
+    // Cancel any in-flight jump/duck so the flash reads clearly.
     game.cow.jumping = false;
     game.cow.ducking = false;
+    if (game.lives <= 0) {
+      state = STATE.HIT;
+      game.hitTime = 0;
+    }
+  }
+
+  function updateHeartsHUD() {
+    heartEls().forEach((el, i) => el.classList.toggle('lost', i >= game.lives));
   }
 
   // ---------- Lifecycle ----------
@@ -1104,11 +1191,15 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
     game.elapsed = 0;
     game.hitTime = 0;
     game.speed = 0.35;
+    game.lives = MAX_LIVES;
+    game.flashUntil = 0;
+    game.invulnUntil = 0;
     game.cow.jumping = false;
     game.cow.ducking = false;
     game.cow.jumpTime = 0;
     game.cow.duckTime = 0;
     scoreEl.textContent = '0';
+    updateHeartsHUD();
     // Reset cow flash + transform.
     if (cowGroup) { cowGroup.position.y = 0; cowGroup.scale.set(1, 1, 1); }
     for (const m of cowMaterials) if (m.emissive) m.emissive.setRGB(0, 0, 0);
