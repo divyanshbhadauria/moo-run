@@ -560,6 +560,9 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
   // ---------- Mic / pitch detection ----------
   let audioCtx = null, analyser = null, micBuffer = null, micStream = null;
   let pitchSmooth = 0;
+  let highHoldTime = 0;
+  let lowHoldTime = 0;
+  const TRIGGER_HOLD = 0.25;
   let voiceActive = false;
   let baselineHz = 160;
   let calibrating = false;
@@ -907,9 +910,11 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
     const c = game.cow;
     const HIGH_TRIGGER = 0.45;
     const LOW_TRIGGER  = -0.45;
-    if (!c.jumping && !c.ducking && voiceActive) {
-      if (pitchSmooth > HIGH_TRIGGER) { c.jumping = true; c.jumpTime = 0; }
-      else if (pitchSmooth < LOW_TRIGGER) { c.ducking = true; c.duckTime = 0; }
+    if (voiceActive && pitchSmooth > HIGH_TRIGGER) highHoldTime += dt; else highHoldTime = 0;
+    if (voiceActive && pitchSmooth < LOW_TRIGGER)  lowHoldTime  += dt; else lowHoldTime  = 0;
+    if (!c.jumping && !c.ducking) {
+      if (highHoldTime >= TRIGGER_HOLD) { c.jumping = true; c.jumpTime = 0; highHoldTime = 0; }
+      else if (lowHoldTime >= TRIGGER_HOLD) { c.ducking = true; c.duckTime = 0; lowHoldTime = 0; }
     }
     if (c.jumping) { c.jumpTime += dt / 0.7; if (c.jumpTime >= 1) { c.jumping = false; c.jumpTime = 0; } }
     if (c.ducking) { c.duckTime += dt / 0.6; if (c.duckTime >= 1) { c.ducking = false; c.duckTime = 0; } }
