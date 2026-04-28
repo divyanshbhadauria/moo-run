@@ -680,13 +680,17 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
     scene = new THREE.Scene();
 
     camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 80);
-    camera.position.set(0, 1.55, 4.0);
-    camera.lookAt(0, 0.5, -3);
+    camera.position.set(0, 1.45, 3.2);
+    camera.lookAt(0, 0.5, -4);
 
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x88aa88, 0.95));
-    const sun = new THREE.DirectionalLight(0xfff3d6, 0.8);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x88aa88, 1.1));
+    const sun = new THREE.DirectionalLight(0xfff3d6, 0.7);
     sun.position.set(3, 8, 5);
     scene.add(sun);
+    // Fill light from the opposite side so left-hand props don't sit in pitch shadow.
+    const fill = new THREE.DirectionalLight(0xc8d8ff, 0.45);
+    fill.position.set(-4, 6, 2);
+    scene.add(fill);
 
     // Ground (long grass plane, scrolling texture)
     groundTex = makeGrassTexture();
