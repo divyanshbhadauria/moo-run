@@ -88,26 +88,27 @@
   }
   #hearts {
     background: var(--ui-bg);
-    padding: 6px 12px;
+    padding: 6px 10px;
     border-radius: 999px;
     backdrop-filter: blur(4px);
     margin-top: 6px;
     display: inline-flex;
-    gap: 4px;
-    font-size: 22px;
-    line-height: 1;
+    align-items: center;
+    gap: 6px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
   }
   #hearts .heart {
-    color: #ff5252;
-    text-shadow: 0 0 6px rgba(255, 82, 82, 0.4);
-    transition: opacity 200ms ease, color 200ms ease, transform 200ms ease;
+    width: 30px;
+    height: 28px;
+    color: #ed1f3a;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+    transition: color 200ms ease, opacity 200ms ease, transform 200ms ease, filter 200ms ease;
   }
   #hearts .heart.lost {
-    opacity: 0.25;
-    color: #555;
-    transform: scale(0.85);
-    text-shadow: none;
+    color: #2b1010;
+    opacity: 0.4;
+    transform: scale(0.82);
+    filter: none;
   }
   #playerTag {
     background: var(--ui-bg);
@@ -384,6 +385,18 @@
 </style>
 </head>
 <body>
+  <!-- Mario-style heart icon, referenced via <use href="#mario-heart"> -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="mario-heart" viewBox="0 0 32 30">
+        <path d="M16 27.5 C 16 27.5 2.5 19.5 2.5 11.5 C 2.5 6.8 6.3 3 11 3 C 13.5 3 15.2 4.6 16 6.5 C 16.8 4.6 18.5 3 21 3 C 25.7 3 29.5 6.8 29.5 11.5 C 29.5 19.5 16 27.5 16 27.5 Z"
+              fill="currentColor" stroke="#2b0606" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>
+        <path d="M9.5 9 C 8.2 8 6.8 8.4 6.4 9.6 C 6.0 10.9 7.1 12.5 8.6 13 C 9.9 11.8 10.5 10.0 9.5 9 Z"
+              fill="#ffffff" opacity="0.7"/>
+      </symbol>
+    </defs>
+  </svg>
+
   <div id="app">
     <video id="cam" autoplay muted playsinline></video>
     <canvas id="game"></canvas>
@@ -392,9 +405,9 @@
       <div>
         <div id="score">0</div>
         <div id="hearts">
-          <span class="heart">♥</span>
-          <span class="heart">♥</span>
-          <span class="heart">♥</span>
+          <svg class="heart" viewBox="0 0 32 30"><use href="#mario-heart"/></svg>
+          <svg class="heart" viewBox="0 0 32 30"><use href="#mario-heart"/></svg>
+          <svg class="heart" viewBox="0 0 32 30"><use href="#mario-heart"/></svg>
         </div>
         <div id="playerTag" style="display:none;">
           <span class="dot" id="playerDot"></span>
