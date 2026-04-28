@@ -426,6 +426,9 @@
     </div>
   </div>
 
+<!-- three.js (r146 UMD — exposes window.THREE) -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.146.0/build/three.min.js"></script>
+
 <!-- Supabase JS SDK (v2) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
@@ -464,7 +467,6 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
   // ---------- DOM ----------
   const camEl       = document.getElementById('cam');
   const canvas      = document.getElementById('game');
-  const ctx         = canvas.getContext('2d');
   const scoreEl     = document.getElementById('score');
   const pitchBarEl  = document.getElementById('pitchBar');
   const pitchHzEl   = document.getElementById('pitchHz');
@@ -527,11 +529,14 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
     DPR = Math.min(window.devicePixelRatio || 1, 2);
     W = window.innerWidth;
     H = window.innerHeight;
-    canvas.width  = W * DPR;
-    canvas.height = H * DPR;
     canvas.style.width  = W + 'px';
     canvas.style.height = H + 'px';
-    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    if (renderer) {
+      renderer.setPixelRatio(DPR);
+      renderer.setSize(W, H, false);
+      camera.aspect = W / H;
+      camera.updateProjectionMatrix();
+    }
   }
   window.addEventListener('resize', resize);
   resize();
@@ -639,230 +644,333 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
     await camEl.play().catch(() => {});
   }
 
-  // ---------- Track geometry ----------
-  const TRACK = {
-    horizonY: () => H * 0.22,
-    nearY:    () => H * 0.92,
-    horizonHalfW: () => Math.min(W, H) * 0.06,
-    nearHalfW:    () => Math.min(W, H) * 0.42,
-    cowZ: 0.12,
+  // ---------- 3D world geometry ----------
+  // Cow sits at world Z=0. Camera is behind & above. Obstacles spawn far in -Z
+  // and travel toward the cow as their normalized z (1 → 0) ticks down.
+  const TRACK = { cowZ: 0.12 };               // normalized — kept for spawn/collision logic
+  const WORLD = {
+    trackHalfW: 1.55,
+    horizonZ: -28,
+    cowWorldZ: 0,
+    jumpHeight: 1.4,
   };
-  function zToY(z) { const t = 1 - z; return TRACK.horizonY() + t * (TRACK.nearY() - TRACK.horizonY()); }
-  function zToHalfWidth(z) { const t = 1 - z; return TRACK.horizonHalfW() + t * (TRACK.nearHalfW() - TRACK.horizonHalfW()); }
-  function zToScale(z) { const t = 1 - z; return 0.18 + t * 0.95; }
-
-  function drawTrack() {
-    const cx = W / 2;
-    const hY = TRACK.horizonY(), nY = TRACK.nearY();
-    const hHW = TRACK.horizonHalfW(), nHW = TRACK.nearHalfW();
-    ctx.beginPath();
-    ctx.moveTo(cx - hHW, hY); ctx.lineTo(cx + hHW, hY);
-    ctx.lineTo(cx + nHW, nY); ctx.lineTo(cx - nHW, nY);
-    ctx.closePath();
-    const grad = ctx.createLinearGradient(0, hY, 0, nY);
-    grad.addColorStop(0, '#6abf69'); grad.addColorStop(1, '#2e7d32');
-    ctx.fillStyle = grad; ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 2; ctx.stroke();
-
-    // motion stripes
-    const stripes = 14;
-    const offset = (game.elapsed * 0.6) % 1;
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(cx - hHW, hY); ctx.lineTo(cx + hHW, hY);
-    ctx.lineTo(cx + nHW, nY); ctx.lineTo(cx - nHW, nY);
-    ctx.closePath();
-    ctx.clip();
-    for (let i = 0; i < stripes; i++) {
-      const z = ((i / stripes) + offset) % 1;
-      const y = zToY(z), hw = zToHalfWidth(z);
-      const nz = ((i + 1) / stripes + offset) % 1;
-      const ny = zToY(nz), nhw = zToHalfWidth(nz);
-      ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.06)';
-      ctx.beginPath();
-      ctx.moveTo(cx - hw, y); ctx.lineTo(cx + hw, y);
-      ctx.lineTo(cx + nhw, ny); ctx.lineTo(cx - nhw, ny);
-      ctx.closePath();
-      ctx.fill();
-    }
-    ctx.restore();
+  // Convert obstacle's normalized z to world Z (so o.z=cowZ ⇒ world Z=0).
+  function obstacleWorldZ(normZ) {
+    return (TRACK.cowZ - normZ) * (WORLD.cowWorldZ - WORLD.horizonZ) / (1 - TRACK.cowZ);
   }
 
-  function drawSideFences() {
-    const posts = 10;
-    const offset = (game.elapsed * 0.6) % 1;
-    for (let i = 0; i < posts; i++) {
-      const z = ((i / posts) + offset) % 1;
-      drawPost(z, -1); drawPost(z, +1);
-    }
-  }
-  function drawPost(z, side) {
-    const cx = W / 2;
-    const y = zToY(z), hw = zToHalfWidth(z), sc = zToScale(z);
-    const x = cx + side * (hw + 6 * sc);
-    const w = 8 * sc, h = 30 * sc;
-    ctx.fillStyle = '#8b5a2b'; ctx.fillRect(x - w / 2, y - h, w, h);
-    ctx.fillStyle = '#5d3a1a'; ctx.fillRect(x - w / 2, y - 4 * sc, w, 4 * sc);
-  }
+  // ---------- three.js scene ----------
+  let renderer = null, scene = null, camera = null;
+  let groundTex = null, groundMesh = null;
+  const FENCE_TILES_PER_SIDE = 14;
+  const FENCE_TILE_SPACING = 2.2;
+  let leftFenceTiles = [], rightFenceTiles = [];
+  let cowGroup = null, cowLegs = null, cowMaterials = [];
+  const obstacleMeshes = new Map(); // obstacle -> THREE.Group
 
-  // ---------- Cow drawing (color-aware + collision flash) ----------
-  function drawCow() {
-    const c = game.cow;
-    const palette = COW_COLORS[game.cowColorKey] || COW_COLORS.classic;
-    const z = TRACK.cowZ;
-    const baseY = zToY(z);
-    const sc = zToScale(z) * 1.0;
-    const jumpY = c.jumping ? Math.sin(c.jumpTime * Math.PI) * 90 * sc : 0;
-    const duckSquish = c.ducking ? 0.65 : 1.0;
-    const cx = W / 2;
-    const cy = baseY - jumpY - 28 * sc * duckSquish;
+  function initThree() {
+    renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+    renderer.setPixelRatio(DPR);
+    renderer.setSize(W, H, false);
+    renderer.outputEncoding = THREE.sRGBEncoding;
 
-    // collision red glow
-    const flashing = state === STATE.HIT;
-    if (flashing) {
-      const flashAmt = 0.5 + 0.5 * Math.sin(game.hitTime * 25);
-      ctx.save();
-      ctx.shadowColor = `rgba(255,40,40,${0.8 * flashAmt + 0.2})`;
-      ctx.shadowBlur = 30;
-    }
+    scene = new THREE.Scene();
 
-    // shadow on the ground
-    ctx.fillStyle = `rgba(0,0,0,${0.35 - jumpY / 400})`;
-    ctx.beginPath();
-    ctx.ellipse(cx, baseY + 4 * sc, 50 * sc, 10 * sc, 0, 0, Math.PI * 2);
-    ctx.fill();
+    camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 80);
+    camera.position.set(0, 1.55, 4.0);
+    camera.lookAt(0, 0.5, -3);
 
-    // legs
-    const phase = c.runPhase;
-    const legOffset = c.jumping ? 0 : Math.sin(phase) * 6 * sc;
-    drawLeg(cx - 22 * sc, cy + 30 * sc * duckSquish, sc, +legOffset, palette);
-    drawLeg(cx + 22 * sc, cy + 30 * sc * duckSquish, sc, -legOffset, palette);
-    drawLeg(cx - 14 * sc, cy + 28 * sc * duckSquish, sc * 0.9, -legOffset * 0.6, palette);
-    drawLeg(cx + 14 * sc, cy + 28 * sc * duckSquish, sc * 0.9, +legOffset * 0.6, palette);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x88aa88, 0.95));
+    const sun = new THREE.DirectionalLight(0xfff3d6, 0.8);
+    sun.position.set(3, 8, 5);
+    scene.add(sun);
 
-    // body
-    const bodyW = 90 * sc, bodyH = 60 * sc * duckSquish;
-    const outlineW = flashing ? 4 : 2;
-    const outlineCol = flashing ? '#ff2d2d' : palette.outline;
-    roundRect(cx - bodyW / 2, cy - bodyH / 2, bodyW, bodyH, 22 * sc, palette.body, outlineCol, outlineW);
-    if (palette.spot) {
-      drawSpot(cx - 18 * sc, cy - 4 * sc, 14 * sc, 10 * sc, palette.spot);
-      drawSpot(cx + 22 * sc, cy + 8 * sc, 18 * sc, 12 * sc, palette.spot);
-      drawSpot(cx + 4 * sc,  cy - 14 * sc * duckSquish, 10 * sc, 7 * sc, palette.spot);
-      drawSpot(cx - 30 * sc, cy + 16 * sc * duckSquish, 10 * sc, 7 * sc, palette.spot);
-    }
-
-    // tail
-    ctx.strokeStyle = palette.tail;
-    ctx.lineWidth = 3 * sc;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy - bodyH / 2);
-    ctx.quadraticCurveTo(
-      cx + Math.sin(phase * 0.8) * 14 * sc,
-      cy - bodyH / 2 - 18 * sc,
-      cx - 6 * sc + Math.sin(phase) * 8 * sc,
-      cy - bodyH / 2 - 22 * sc
+    // Ground (long grass plane, scrolling texture)
+    groundTex = makeGrassTexture();
+    groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping;
+    groundTex.repeat.set(2, 30);
+    groundMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(WORLD.trackHalfW * 2 + 0.6, 80),
+      new THREE.MeshLambertMaterial({ map: groundTex })
     );
-    ctx.stroke();
-    ctx.fillStyle = palette.tail;
-    const tx = cx - 6 * sc + Math.sin(phase) * 8 * sc;
-    const ty = cy - bodyH / 2 - 22 * sc;
-    ctx.beginPath();
-    ctx.ellipse(tx, ty, 4 * sc, 5 * sc, 0, 0, Math.PI * 2);
-    ctx.fill();
+    groundMesh.rotation.x = -Math.PI / 2;
+    groundMesh.position.z = -36;
+    scene.add(groundMesh);
 
-    // head
-    const headY = cy - bodyH / 2 - 4 * sc;
-    roundRect(cx - 22 * sc, headY - 30 * sc, 44 * sc, 34 * sc, 14 * sc, palette.body, outlineCol, outlineW);
-    // ears
-    ctx.fillStyle = palette.body;
-    ctx.strokeStyle = outlineCol;
-    ctx.lineWidth = 2;
-    ear(cx - 24 * sc, headY - 24 * sc, -1, sc);
-    ear(cx + 24 * sc, headY - 24 * sc, +1, sc);
-    // horns
-    ctx.strokeStyle = '#d6c08b'; ctx.lineWidth = 3 * sc;
-    ctx.beginPath();
-    ctx.moveTo(cx - 10 * sc, headY - 28 * sc);
-    ctx.quadraticCurveTo(cx - 14 * sc, headY - 36 * sc, cx - 6 * sc, headY - 36 * sc);
-    ctx.moveTo(cx + 10 * sc, headY - 28 * sc);
-    ctx.quadraticCurveTo(cx + 14 * sc, headY - 36 * sc, cx + 6 * sc, headY - 36 * sc);
-    ctx.stroke();
+    buildSideFences();
+    rebuildCow();
+  }
 
-    if (flashing) ctx.restore();
-  }
-  function drawLeg(x, y, sc, swing, palette) {
-    ctx.fillStyle = palette.body;
-    ctx.strokeStyle = (state === STATE.HIT) ? '#ff2d2d' : palette.outline;
-    ctx.lineWidth = (state === STATE.HIT) ? 3 : 2;
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(x - 6 * sc, y, 12 * sc, 22 * sc + swing, 4);
-    else ctx.rect(x - 6 * sc, y, 12 * sc, 22 * sc + swing);
-    ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#222';
-    ctx.fillRect(x - 6 * sc, y + 18 * sc + swing, 12 * sc, 5 * sc);
-  }
-  function drawSpot(x, y, rx, ry, color) {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  function ear(x, y, side, sc) {
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.quadraticCurveTo(x + side * 14 * sc, y - 4 * sc, x + side * 10 * sc, y + 8 * sc);
-    ctx.closePath();
-    ctx.fill(); ctx.stroke();
-  }
-  function roundRect(x, y, w, h, r, fill, stroke, lw) {
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(x, y, w, h, r);
-    else {
-      ctx.moveTo(x + r, y);
-      ctx.arcTo(x + w, y,     x + w, y + h, r);
-      ctx.arcTo(x + w, y + h, x,     y + h, r);
-      ctx.arcTo(x,     y + h, x,     y,     r);
-      ctx.arcTo(x,     y,     x + w, y,     r);
-      ctx.closePath();
+  function makeGrassTexture() {
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 256;
+    const cx = c.getContext('2d');
+    cx.fillStyle = '#4caf50'; cx.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 1000; i++) {
+      cx.fillStyle = i % 2 ? '#3c8c3f' : '#62c065';
+      cx.fillRect(Math.random() * 256, Math.random() * 256, 1.6, 1.6);
     }
-    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
-    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw || 1; ctx.stroke(); }
+    cx.fillStyle = 'rgba(0, 0, 0, 0.06)';
+    cx.fillRect(0, 124, 256, 8);
+    return new THREE.CanvasTexture(c);
   }
 
-  // ---------- Obstacles ----------
+  function buildSideFences() {
+    const woodMat   = new THREE.MeshLambertMaterial({ color: 0x8b5a2b });
+    const woodDark  = new THREE.MeshLambertMaterial({ color: 0x5d3a1a });
+    function makeTile(side) {
+      const grp = new THREE.Group();
+      const x = side * (WORLD.trackHalfW + 0.18);
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.85, 0.10), woodMat);
+      post.position.set(x, 0.42, 0);
+      grp.add(post);
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.06, 0.14), woodDark);
+      cap.position.set(x, 0.86, 0);
+      grp.add(cap);
+      const railGeom = new THREE.BoxGeometry(0.05, 0.06, FENCE_TILE_SPACING);
+      const rail1 = new THREE.Mesh(railGeom, woodMat);
+      rail1.position.set(x, 0.65, -FENCE_TILE_SPACING / 2);
+      const rail2 = new THREE.Mesh(railGeom, woodMat);
+      rail2.position.set(x, 0.30, -FENCE_TILE_SPACING / 2);
+      grp.add(rail1, rail2);
+      scene.add(grp);
+      return grp;
+    }
+    for (let i = 0; i < FENCE_TILES_PER_SIDE; i++) {
+      leftFenceTiles.push(makeTile(-1));
+      rightFenceTiles.push(makeTile(+1));
+    }
+  }
+
+  function rebuildCow() {
+    if (cowGroup) { scene.remove(cowGroup); disposeObject(cowGroup); }
+    const palette = COW_COLORS[game.cowColorKey] || COW_COLORS.classic;
+    const built = buildCow(palette);
+    cowGroup = built.group;
+    cowLegs = built.legs;
+    cowMaterials = built.flashMaterials;
+    cowGroup.position.set(0, 0, WORLD.cowWorldZ);
+    scene.add(cowGroup);
+  }
+
+  // Cow faces -Z (away from camera). Camera sits at +Z, sees its back.
+  function buildCow(palette) {
+    const grp = new THREE.Group();
+    const bodyMat = new THREE.MeshLambertMaterial({ color: palette.body });
+    const tailMat = new THREE.MeshLambertMaterial({ color: palette.tail });
+    const hornMat = new THREE.MeshLambertMaterial({ color: 0xd6c08b });
+    const hoofMat = new THREE.MeshLambertMaterial({ color: 0x222222 });
+    const eyeMat  = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    const snoutMat = new THREE.MeshLambertMaterial({ color: 0xf2c4ae });
+    const flashMaterials = [bodyMat, tailMat]; // pulse these red on hit
+
+    // Body
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.45, 0.85), bodyMat);
+    body.position.y = 0.55;
+    grp.add(body);
+
+    // Spots — small flat boxes glued to body sides
+    if (palette.spot) {
+      const spotMat = new THREE.MeshLambertMaterial({ color: palette.spot });
+      flashMaterials.push(spotMat);
+      const spotPositions = [
+        [-0.28, 0.65,  0.10, 0.20, 0.18, 0.04],
+        [ 0.28, 0.50, -0.10, 0.22, 0.20, 0.04],
+        [-0.10, 0.78,  0.20, 0.24, 0.04, 0.18],
+        [ 0.18, 0.78, -0.20, 0.20, 0.04, 0.18],
+        [ 0.05, 0.55,  0.32, 0.15, 0.10, 0.04],
+      ];
+      for (const [x, y, z, sx, sy, sz] of spotPositions) {
+        const s = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), spotMat);
+        s.position.set(x, y, z);
+        grp.add(s);
+      }
+    }
+
+    // Head (forward = -Z)
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.36, 0.40), bodyMat);
+    head.position.set(0, 0.78, -0.55);
+    grp.add(head);
+
+    // Snout
+    const snout = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.22, 0.18), snoutMat);
+    snout.position.set(0, 0.66, -0.78);
+    grp.add(snout);
+
+    // Eyes
+    const eyeGeom = new THREE.SphereGeometry(0.04, 8, 8);
+    const eyeL = new THREE.Mesh(eyeGeom, eyeMat); eyeL.position.set(-0.10, 0.84, -0.74);
+    const eyeR = new THREE.Mesh(eyeGeom, eyeMat); eyeR.position.set( 0.10, 0.84, -0.74);
+    grp.add(eyeL, eyeR);
+
+    // Ears
+    const earGeom = new THREE.BoxGeometry(0.14, 0.10, 0.06);
+    const earL = new THREE.Mesh(earGeom, bodyMat);
+    earL.position.set(-0.22, 0.94, -0.55); earL.rotation.z = 0.5;
+    const earR = new THREE.Mesh(earGeom, bodyMat);
+    earR.position.set( 0.22, 0.94, -0.55); earR.rotation.z = -0.5;
+    grp.add(earL, earR);
+
+    // Horns
+    const hornGeom = new THREE.CylinderGeometry(0.025, 0.05, 0.18, 6);
+    const hornL = new THREE.Mesh(hornGeom, hornMat);
+    hornL.position.set(-0.13, 1.02, -0.55); hornL.rotation.z = 0.35;
+    const hornR = new THREE.Mesh(hornGeom, hornMat);
+    hornR.position.set( 0.13, 1.02, -0.55); hornR.rotation.z = -0.35;
+    grp.add(hornL, hornR);
+
+    // Legs (with hoof at the bottom). Legs are pivoted at top so swinging
+    // rotates them about the shoulder/hip rather than the foot.
+    const legs = [];
+    const legPositions = [
+      [-0.18,  0.30],  // back-left
+      [ 0.18,  0.30],  // back-right
+      [-0.18, -0.30],  // front-left
+      [ 0.18, -0.30],  // front-right
+    ];
+    for (const [x, z] of legPositions) {
+      const pivot = new THREE.Group();
+      pivot.position.set(x, 0.45, z);
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.45, 0.10), bodyMat);
+      leg.position.y = -0.225;
+      pivot.add(leg);
+      const hoof = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.06, 0.13), hoofMat);
+      hoof.position.y = -0.45;
+      pivot.add(hoof);
+      grp.add(pivot);
+      legs.push(pivot);
+    }
+
+    // Tail
+    const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.32, 6), tailMat);
+    tail.position.set(0, 0.65, 0.45);
+    tail.rotation.x = 0.4;
+    grp.add(tail);
+    const tailTip = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), tailMat);
+    tailTip.position.set(0, 0.50, 0.58);
+    grp.add(tailTip);
+
+    return { group: grp, legs, flashMaterials };
+  }
+
+  // ---------- Obstacles (3D wooden hurdle / overhead beam) ----------
+  function buildObstacleMesh(type) {
+    const grp = new THREE.Group();
+    const woodMat = new THREE.MeshLambertMaterial({ color: 0x8b5a2b });
+    const railMat = new THREE.MeshLambertMaterial({ color: type === 'high' ? 0x6b3410 : 0xa0522d });
+    if (type === 'low') {
+      const postH = 0.75;
+      const railY = 0.55;
+      const postGeom = new THREE.BoxGeometry(0.12, postH, 0.12);
+      const postL = new THREE.Mesh(postGeom, woodMat);
+      postL.position.set(-WORLD.trackHalfW + 0.10, postH / 2, 0);
+      const postR = new THREE.Mesh(postGeom, woodMat);
+      postR.position.set( WORLD.trackHalfW - 0.10, postH / 2, 0);
+      grp.add(postL, postR);
+      const rail = new THREE.Mesh(
+        new THREE.BoxGeometry(WORLD.trackHalfW * 2 - 0.30, 0.10, 0.10),
+        railMat
+      );
+      rail.position.set(0, railY, 0);
+      grp.add(rail);
+      // diagonal brace, like a sawhorse
+      const brace = new THREE.Mesh(
+        new THREE.BoxGeometry(WORLD.trackHalfW * 2 - 0.40, 0.06, 0.06),
+        railMat
+      );
+      brace.position.set(0, 0.30, 0);
+      brace.rotation.z = 0.05;
+      grp.add(brace);
+    } else {
+      const postH = 2.0;
+      const postGeom = new THREE.BoxGeometry(0.12, postH, 0.12);
+      const postL = new THREE.Mesh(postGeom, woodMat);
+      postL.position.set(-WORLD.trackHalfW + 0.10, postH / 2, 0);
+      const postR = new THREE.Mesh(postGeom, woodMat);
+      postR.position.set( WORLD.trackHalfW - 0.10, postH / 2, 0);
+      grp.add(postL, postR);
+      const rail = new THREE.Mesh(
+        new THREE.BoxGeometry(WORLD.trackHalfW * 2 - 0.30, 0.14, 0.12),
+        railMat
+      );
+      rail.position.set(0, 1.7, 0);
+      grp.add(rail);
+      // little flag so it reads as the duck-under variant
+      const flagMat = new THREE.MeshLambertMaterial({ color: 0x82b1ff });
+      const flag = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.14, 0.02), flagMat);
+      flag.position.set(0, 1.88, 0);
+      grp.add(flag);
+    }
+    return grp;
+  }
+
   function spawnObstacle() {
     const type = Math.random() < 0.65 ? 'low' : 'high';
-    game.obstacles.push({ z: 1.0, type, cleared: false });
+    const o = { z: 1.0, type, cleared: false };
+    game.obstacles.push(o);
+    const mesh = buildObstacleMesh(type);
+    mesh.position.z = obstacleWorldZ(o.z);
+    scene.add(mesh);
+    obstacleMeshes.set(o, mesh);
   }
-  function drawObstacle(o) {
-    const cx = W / 2;
-    const y = zToY(o.z), hw = zToHalfWidth(o.z), sc = zToScale(o.z);
-    if (o.type === 'low') {
-      const barH = 22 * sc, gap = 10 * sc;
-      drawWoodPost(cx - hw + 4 * sc, y - barH - gap, 6 * sc, barH + gap);
-      drawWoodPost(cx + hw - 4 * sc, y - barH - gap, 6 * sc, barH + gap);
-      ctx.fillStyle = '#a0522d'; ctx.fillRect(cx - hw + 2 * sc, y - barH, hw * 2 - 4 * sc, 8 * sc);
-      ctx.strokeStyle = '#5d3a1a'; ctx.lineWidth = 1.5;
-      ctx.strokeRect(cx - hw + 2 * sc, y - barH, hw * 2 - 4 * sc, 8 * sc);
-    } else {
-      const beamY = y - 110 * sc, beamH = 10 * sc;
-      drawWoodPost(cx - hw + 4 * sc, beamY, 6 * sc, (y - beamY));
-      drawWoodPost(cx + hw - 4 * sc, beamY, 6 * sc, (y - beamY));
-      ctx.fillStyle = '#8b4a1f'; ctx.fillRect(cx - hw + 2 * sc, beamY, hw * 2 - 4 * sc, beamH);
-      ctx.strokeStyle = '#4d2a10'; ctx.lineWidth = 1.5;
-      ctx.strokeRect(cx - hw + 2 * sc, beamY, hw * 2 - 4 * sc, beamH);
-      ctx.fillStyle = '#82b1ff';
-      ctx.beginPath();
-      ctx.moveTo(cx - 12 * sc, beamY - 2 * sc);
-      ctx.lineTo(cx + 12 * sc, beamY - 8 * sc);
-      ctx.lineTo(cx - 12 * sc, beamY - 14 * sc);
-      ctx.closePath(); ctx.fill();
+
+  function removeObstacle(o) {
+    const mesh = obstacleMeshes.get(o);
+    if (mesh) { scene.remove(mesh); disposeObject(mesh); obstacleMeshes.delete(o); }
+  }
+
+  function disposeObject(obj) {
+    obj.traverse(n => {
+      if (n.geometry) n.geometry.dispose();
+      if (n.material) {
+        if (Array.isArray(n.material)) n.material.forEach(m => m.dispose());
+        else n.material.dispose();
+      }
+    });
+  }
+
+  // ---------- Per-frame scene sync ----------
+  function syncScene() {
+    if (!scene) return;
+    const c = game.cow;
+
+    // Cow vertical motion: jump (sine arc) and duck (squash on Y).
+    const jumpY = c.jumping ? Math.sin(c.jumpTime * Math.PI) * WORLD.jumpHeight : 0;
+    const duckSquish = c.ducking ? 0.6 : 1.0;
+    cowGroup.position.y = jumpY;
+    cowGroup.scale.set(1, duckSquish, 1);
+
+    // Run-cycle leg swing — opposite phase between front/back diagonals.
+    if (cowLegs && cowLegs.length === 4) {
+      const swing = c.jumping ? 0.4 : Math.sin(c.runPhase) * 0.55;
+      cowLegs[0].rotation.x =  swing; // back-left
+      cowLegs[1].rotation.x = -swing; // back-right
+      cowLegs[2].rotation.x = -swing; // front-left
+      cowLegs[3].rotation.x =  swing; // front-right
     }
-  }
-  function drawWoodPost(x, y, w, h) {
-    ctx.fillStyle = '#8b5a2b'; ctx.fillRect(x - w / 2, y, w, h);
-    ctx.fillStyle = '#5d3a1a'; ctx.fillRect(x - w / 2, y + h - 3, w, 3);
+
+    // Ground texture scroll, side fences scroll — both driven by elapsed * speed.
+    const scroll = game.elapsed * game.speed * 6;
+    if (groundTex) groundTex.offset.y = -scroll * 0.05;
+    const cycle = ((scroll % FENCE_TILE_SPACING) + FENCE_TILE_SPACING) % FENCE_TILE_SPACING;
+    for (let i = 0; i < FENCE_TILES_PER_SIDE; i++) {
+      const z = -i * FENCE_TILE_SPACING + cycle + 1.5;
+      leftFenceTiles[i].position.z = z;
+      rightFenceTiles[i].position.z = z;
+    }
+
+    // Obstacles' world Z follows their normalized z.
+    for (const o of game.obstacles) {
+      const mesh = obstacleMeshes.get(o);
+      if (mesh) mesh.position.z = obstacleWorldZ(o.z);
+    }
+
+    // Collision flash — pulse the cow's body materials' emissive red.
+    const flashing = state === STATE.HIT;
+    const amt = flashing ? (0.4 + 0.4 * Math.sin(game.hitTime * 25)) : 0;
+    for (const mat of cowMaterials) {
+      if (mat.emissive) mat.emissive.setRGB(amt, 0, 0);
+    }
   }
 
   // ---------- Game loop ----------
@@ -872,7 +980,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
     last = now;
     if (state === STATE.PLAY) update(dt);
     else if (state === STATE.HIT) updateHit(dt);
-    draw();
+    syncScene();
+    if (renderer) renderer.render(scene, camera);
     requestAnimationFrame(tick);
   }
 
@@ -939,29 +1048,24 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
         }
       }
     }
-    game.obstacles = game.obstacles.filter(o => o.z > -0.1);
+    game.obstacles = game.obstacles.filter(o => {
+      if (o.z > -0.1) return true;
+      removeObstacle(o);
+      return false;
+    });
   }
 
   function triggerCollision() {
     state = STATE.HIT;
     game.hitTime = 0;
-    // stop the cow's jump/duck so red outline reads clearly
+    // stop the cow's jump/duck so the red flash reads clearly
     game.cow.jumping = false;
     game.cow.ducking = false;
   }
 
-  function draw() {
-    ctx.clearRect(0, 0, W, H);
-    drawTrack();
-    drawSideFences();
-    const obs = game.obstacles.slice().sort((a, b) => b.z - a.z);
-    for (const o of obs) if (o.z >= TRACK.cowZ) drawObstacle(o);
-    drawCow();
-    for (const o of obs) if (o.z < TRACK.cowZ) drawObstacle(o);
-  }
-
   // ---------- Lifecycle ----------
   function resetGame() {
+    for (const o of game.obstacles) removeObstacle(o);
     game.obstacles = [];
     game.spawnTimer = 0;
     game.spawnInterval = 1.6;
@@ -974,6 +1078,9 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
     game.cow.jumpTime = 0;
     game.cow.duckTime = 0;
     scoreEl.textContent = '0';
+    // Reset cow flash + transform.
+    if (cowGroup) { cowGroup.position.y = 0; cowGroup.scale.set(1, 1, 1); }
+    for (const m of cowMaterials) if (m.emissive) m.emissive.setRGB(0, 0, 0);
   }
 
   async function goToGameOver() {
@@ -1055,6 +1162,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
     game.username = name;
     game.cowColorKey = selectedColor;
     savePrefs(name, selectedColor);
+    rebuildCow();
 
     // HUD player tag
     playerTag.style.display = 'inline-flex';
@@ -1106,7 +1214,10 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
   // ---------- Boot ----------
   const prefs = loadPrefs();
   selectedColor = prefs.cowColor;
+  game.cowColorKey = selectedColor;
   buildColorPicker();
+  initThree();
+  resize();           // re-apply now that the renderer exists
   refreshLeaderboard(lbStart);
   requestAnimationFrame(tick);
 })();
