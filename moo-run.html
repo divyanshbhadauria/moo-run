@@ -1,0 +1,1110 @@
+<!--
+  MOO RUN — voice-controlled cow runner
+  ----------------------------------------------------
+  SETUP (5 minutes):
+    1. Create a free project at https://supabase.com (any region)
+    2. In the Supabase SQL editor, run the SQL from README.md
+       (creates the `leaderboard` table + read/insert policies)
+    3. In Project Settings → API, copy the "Project URL" and the
+       "anon public" key, and paste them below where it says
+       SUPABASE_URL / SUPABASE_ANON_KEY.
+    4. Open this file in a browser, or deploy to Vercel
+       (see README.md for the 3-step Vercel walk-through).
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Moo Run — Voice-Controlled Cow Game</title>
+<style>
+  :root {
+    --grass: #4caf50;
+    --grass-dark: #2e7d32;
+    --wood: #a0522d;
+    --wood-dark: #6b3410;
+    --ui-bg: rgba(0, 0, 0, 0.55);
+    --accent: #ffeb3b;
+    --bad: #ff5252;
+    --good: #69f0ae;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    background: #000;
+    color: white;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  #app {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #cam {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+    background: #111;
+    z-index: 0;
+  }
+  #game {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+    pointer-events: none;
+  }
+  #hud {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    right: 16px;
+    z-index: 2;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    pointer-events: none;
+  }
+  #score {
+    background: var(--ui-bg);
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-weight: 800;
+    font-size: 20px;
+    backdrop-filter: blur(4px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+  #playerTag {
+    background: var(--ui-bg);
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 14px;
+    backdrop-filter: blur(4px);
+    margin-top: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #playerTag .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    border: 1px solid rgba(0,0,0,0.3);
+  }
+  #pitchPanel {
+    background: var(--ui-bg);
+    padding: 10px 12px;
+    border-radius: 14px;
+    backdrop-filter: blur(4px);
+    min-width: 130px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+  #pitchLabel {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+    text-align: center;
+    opacity: 0.85;
+  }
+  #pitchBarWrap {
+    position: relative;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  #pitchBar {
+    position: absolute;
+    inset: 0 auto 0 50%;
+    width: 0%;
+    background: var(--accent);
+    transition: width 60ms linear, background 100ms linear;
+    border-radius: 4px;
+  }
+  #pitchHz {
+    text-align: center;
+    font-size: 12px;
+    margin-top: 6px;
+    opacity: 0.85;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(6px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 24px;
+    overflow-y: auto;
+  }
+  .overlay.hidden { display: none; }
+  .overlay h1 {
+    font-size: 44px;
+    margin-bottom: 6px;
+    text-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+  }
+  .overlay h2 {
+    font-size: 32px;
+    margin-bottom: 10px;
+  }
+  .overlay p {
+    font-size: 15px;
+    margin: 4px 0;
+    max-width: 320px;
+    opacity: 0.95;
+  }
+  .overlay .legend {
+    display: flex;
+    gap: 14px;
+    margin: 14px 0 10px;
+  }
+  .legend .pill {
+    background: rgba(255, 255, 255, 0.10);
+    padding: 8px 14px;
+    border-radius: 12px;
+    font-size: 13px;
+    min-width: 100px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+  }
+  .legend .pill strong { display: block; font-size: 16px; margin-bottom: 2px; }
+  .legend .high strong { color: var(--good); }
+  .legend .low strong { color: #82b1ff; }
+
+  /* Username input */
+  .field {
+    width: 100%;
+    max-width: 320px;
+    margin: 10px 0 4px;
+  }
+  .field label {
+    display: block;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    opacity: 0.75;
+    margin-bottom: 6px;
+    text-align: left;
+  }
+  .field input {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(0, 0, 0, 0.35);
+    color: white;
+    font-size: 16px;
+    font-family: inherit;
+    outline: none;
+  }
+  .field input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(255, 235, 59, 0.25);
+  }
+
+  /* Color picker */
+  #colorPicker {
+    display: flex;
+    gap: 10px;
+    margin: 14px 0 6px;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 320px;
+  }
+  .swatch {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 3px solid rgba(255, 255, 255, 0.2);
+    position: relative;
+    background-clip: padding-box;
+    transition: transform 100ms ease, border-color 120ms ease;
+  }
+  .swatch:hover { transform: scale(1.08); }
+  .swatch.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(255, 235, 59, 0.3);
+  }
+  .swatch::after {
+    /* small spot indicator */
+    content: '';
+    position: absolute;
+    top: 24%; left: 24%;
+    width: 30%; height: 30%;
+    border-radius: 50%;
+    background: var(--spot, transparent);
+  }
+
+  button.cta {
+    margin-top: 12px;
+    background: var(--accent);
+    color: #222;
+    border: none;
+    padding: 14px 28px;
+    font-size: 17px;
+    font-weight: 800;
+    border-radius: 999px;
+    cursor: pointer;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+    letter-spacing: 0.5px;
+  }
+  button.cta:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  button.cta.secondary {
+    background: rgba(255, 255, 255, 0.15);
+    color: white;
+    box-shadow: none;
+    margin-top: 8px;
+  }
+  button.cta:active { transform: translateY(1px); }
+
+  .small {
+    font-size: 11px;
+    opacity: 0.65;
+    margin-top: 12px;
+    max-width: 280px;
+  }
+  #permError {
+    color: var(--bad);
+    font-size: 13px;
+    margin-top: 8px;
+    min-height: 16px;
+  }
+
+  /* Leaderboard */
+  .leaderboard {
+    width: 100%;
+    max-width: 320px;
+    margin-top: 16px;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    padding: 14px 16px;
+    text-align: left;
+  }
+  .leaderboard h3 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    opacity: 0.85;
+    margin-bottom: 10px;
+    text-align: center;
+  }
+  .lb-list { list-style: none; padding: 0; margin: 0; }
+  .lb-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 4px;
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
+    font-size: 14px;
+  }
+  .lb-row:last-child { border-bottom: none; }
+  .lb-rank {
+    font-weight: 800;
+    width: 24px;
+    text-align: center;
+    color: var(--accent);
+  }
+  .lb-rank.r1 { color: #ffd54f; }
+  .lb-rank.r2 { color: #e0e0e0; }
+  .lb-rank.r3 { color: #ffab91; }
+  .lb-name {
+    flex: 1;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .lb-score {
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+  }
+  .lb-cow {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, 0.3);
+    flex-shrink: 0;
+  }
+  .lb-empty {
+    text-align: center;
+    opacity: 0.6;
+    font-size: 13px;
+    padding: 10px 0;
+  }
+  #saveStatus {
+    font-size: 13px;
+    opacity: 0.85;
+    min-height: 18px;
+    margin-top: 6px;
+  }
+  #saveStatus.ok { color: var(--good); }
+  #saveStatus.err { color: var(--bad); }
+</style>
+</head>
+<body>
+  <div id="app">
+    <video id="cam" autoplay muted playsinline></video>
+    <canvas id="game"></canvas>
+
+    <div id="hud">
+      <div>
+        <div id="score">0</div>
+        <div id="playerTag" style="display:none;">
+          <span class="dot" id="playerDot"></span>
+          <span id="playerName"></span>
+        </div>
+      </div>
+      <div id="pitchPanel">
+        <div id="pitchLabel">🎤 mic</div>
+        <div id="pitchBarWrap"><div id="pitchBar"></div></div>
+        <div id="pitchHz">—</div>
+      </div>
+    </div>
+
+    <!-- START SCREEN -->
+    <div id="startScreen" class="overlay">
+      <h1>🐄 MOO RUN</h1>
+      <p>Use your <strong>voice</strong> to make the cow jump and duck.</p>
+      <div class="legend">
+        <div class="pill high"><strong>HIGH ▲</strong>jump<br/>(treble)</div>
+        <div class="pill low"><strong>LOW ▼</strong>duck<br/>(bass)</div>
+      </div>
+
+      <div class="field">
+        <label for="usernameInput">Your name</label>
+        <input id="usernameInput" maxlength="20" placeholder="e.g. Divyansh" autocomplete="off" />
+      </div>
+
+      <div class="field">
+        <label>Pick your cow</label>
+        <div id="colorPicker"></div>
+      </div>
+
+      <button id="startBtn" class="cta">Allow Mic + Camera & Start</button>
+      <div id="permError"></div>
+      <div class="small">Tip: a "wooo!" jumps, a "huuh" ducks. Works best in a quiet room.</div>
+
+      <div class="leaderboard">
+        <h3>🏆 Top 5 Players</h3>
+        <ol class="lb-list" id="lbStart"></ol>
+      </div>
+    </div>
+
+    <!-- GAME OVER -->
+    <div id="gameOver" class="overlay hidden">
+      <h2>Game Over</h2>
+      <p>You scored</p>
+      <h1 id="finalScore" style="font-size:60px;color:var(--accent);margin:6px 0">0</h1>
+      <div id="saveStatus"></div>
+
+      <div class="leaderboard">
+        <h3>🏆 Top 5 Players</h3>
+        <ol class="lb-list" id="lbEnd"></ol>
+      </div>
+
+      <button id="restartBtn" class="cta">Play again</button>
+      <button id="backToStartBtn" class="cta secondary">Change name / cow</button>
+    </div>
+  </div>
+
+<!-- Supabase JS SDK (v2) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script>
+/* =====================================================================
+   MOO RUN — voice-controlled cow runner with leaderboard
+   ===================================================================== */
+
+// ============== SUPABASE CONFIG (paste yours here) ==============
+const SUPABASE_URL      = 'YOUR_SUPABASE_URL_HERE';      // e.g. https://abcd1234.supabase.co
+const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY_HERE'; // long eyJhbGciOi... string
+// ================================================================
+
+(() => {
+  // ---------- Supabase client ----------
+  let sb = null;
+  const supabaseConfigured =
+    SUPABASE_URL && !SUPABASE_URL.startsWith('YOUR_') &&
+    SUPABASE_ANON_KEY && !SUPABASE_ANON_KEY.startsWith('YOUR_');
+  if (supabaseConfigured && window.supabase) {
+    try { sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY); }
+    catch (e) { console.error('Supabase init failed:', e); }
+  }
+
+  // ---------- Cow color palette (Classic farm pack) ----------
+  const COW_COLORS = {
+    classic: { name: 'Classic',   body: '#fafafa', spot: '#222',    outline: '#222', tail: '#222' },
+    brown:   { name: 'Brown',     body: '#8b5a3c', spot: '#f5e6c8', outline: '#4a2e1a', tail: '#3a2310' },
+    white:   { name: 'White',     body: '#fafafa', spot: null,      outline: '#999',    tail: '#777'  },
+    ginger:  { name: 'Ginger',    body: '#d97a3b', spot: '#fff3df', outline: '#7a3a14', tail: '#5a2a0e' },
+    grey:    { name: 'Grey',      body: '#9ea7ad', spot: '#3a4148', outline: '#3a4148', tail: '#23292e' },
+    pink:    { name: 'Pink',      body: '#f7b7c4', spot: '#fff',    outline: '#a4576a', tail: '#7a3e4d' },
+  };
+  const COW_KEYS = Object.keys(COW_COLORS);
+
+  // ---------- DOM ----------
+  const camEl       = document.getElementById('cam');
+  const canvas      = document.getElementById('game');
+  const ctx         = canvas.getContext('2d');
+  const scoreEl     = document.getElementById('score');
+  const pitchBarEl  = document.getElementById('pitchBar');
+  const pitchHzEl   = document.getElementById('pitchHz');
+  const pitchLblEl  = document.getElementById('pitchLabel');
+  const startScreen = document.getElementById('startScreen');
+  const startBtn    = document.getElementById('startBtn');
+  const gameOverEl  = document.getElementById('gameOver');
+  const finalScore  = document.getElementById('finalScore');
+  const restartBtn  = document.getElementById('restartBtn');
+  const backToStartBtn = document.getElementById('backToStartBtn');
+  const permErr     = document.getElementById('permError');
+  const usernameInput = document.getElementById('usernameInput');
+  const colorPicker = document.getElementById('colorPicker');
+  const lbStart     = document.getElementById('lbStart');
+  const lbEnd       = document.getElementById('lbEnd');
+  const saveStatus  = document.getElementById('saveStatus');
+  const playerTag   = document.getElementById('playerTag');
+  const playerDot   = document.getElementById('playerDot');
+  const playerName  = document.getElementById('playerName');
+
+  // ---------- Persistent prefs ----------
+  function loadPrefs() {
+    try {
+      const u = localStorage.getItem('mooRun.username') || '';
+      const c = localStorage.getItem('mooRun.cowColor') || 'classic';
+      usernameInput.value = u;
+      return { username: u, cowColor: COW_COLORS[c] ? c : 'classic' };
+    } catch (_) { return { username: '', cowColor: 'classic' }; }
+  }
+  function savePrefs(username, cowColor) {
+    try {
+      localStorage.setItem('mooRun.username', username);
+      localStorage.setItem('mooRun.cowColor', cowColor);
+    } catch (_) {}
+  }
+
+  // ---------- Color picker UI ----------
+  let selectedColor = 'classic';
+  function buildColorPicker() {
+    colorPicker.innerHTML = '';
+    for (const key of COW_KEYS) {
+      const c = COW_COLORS[key];
+      const el = document.createElement('div');
+      el.className = 'swatch' + (key === selectedColor ? ' selected' : '');
+      el.style.background = c.body;
+      el.style.setProperty('--spot', c.spot || 'transparent');
+      el.title = c.name;
+      el.dataset.key = key;
+      el.addEventListener('click', () => {
+        selectedColor = key;
+        document.querySelectorAll('.swatch').forEach(s => s.classList.toggle('selected', s.dataset.key === key));
+      });
+      colorPicker.appendChild(el);
+    }
+  }
+
+  // ---------- Resize / DPR ----------
+  let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width  = W * DPR;
+    canvas.height = H * DPR;
+    canvas.style.width  = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---------- Game state ----------
+  const STATE = { INTRO: 0, PLAY: 1, HIT: 2, OVER: 3 };
+  let state = STATE.INTRO;
+
+  const game = {
+    speed: 0.35,
+    obstacles: [],
+    spawnTimer: 0,
+    spawnInterval: 1.6,
+    score: 0,
+    elapsed: 0,
+    cowColorKey: 'classic',
+    username: '',
+    hitTime: 0, // seconds since collision flash started
+    cow: {
+      jumping: false, jumpTime: 0,
+      ducking: false, duckTime: 0,
+      runPhase: 0,
+    },
+  };
+
+  // ---------- Mic / pitch detection ----------
+  let audioCtx = null, analyser = null, micBuffer = null, micStream = null;
+  let pitchSmooth = 0;
+  let voiceActive = false;
+  let baselineHz = 160;
+  let calibrating = false;
+  let calibSamples = [];
+
+  async function startMic() {
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    });
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = audioCtx.createMediaStreamSource(micStream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    micBuffer = new Float32Array(analyser.fftSize);
+    src.connect(analyser);
+  }
+
+  function autoCorrelate(buf, sampleRate) {
+    const SIZE = buf.length;
+    let rms = 0;
+    for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
+    rms = Math.sqrt(rms / SIZE);
+    if (rms < 0.01) return -1;
+    let r1 = 0, r2 = SIZE - 1, thres = 0.2;
+    for (let i = 0; i < SIZE / 2; i++) if (Math.abs(buf[i]) < thres) { r1 = i; break; }
+    for (let i = 1; i < SIZE / 2; i++) if (Math.abs(buf[SIZE - i]) < thres) { r2 = SIZE - i; break; }
+    const slice = buf.subarray(r1, r2);
+    const N = slice.length;
+    if (N < 32) return -1;
+    const c = new Array(N).fill(0);
+    for (let i = 0; i < N; i++)
+      for (let j = 0; j < N - i; j++) c[i] += slice[j] * slice[j + i];
+    let d = 0;
+    while (c[d] > c[d + 1] && d < N - 1) d++;
+    let maxval = -1, maxpos = -1;
+    for (let i = d; i < N; i++) { if (c[i] > maxval) { maxval = c[i]; maxpos = i; } }
+    let T0 = maxpos;
+    if (T0 <= 0) return -1;
+    const x1 = c[T0 - 1] || 0, x2 = c[T0], x3 = c[T0 + 1] || 0;
+    const a = (x1 + x3 - 2 * x2) / 2;
+    const b = (x3 - x1) / 2;
+    if (a) T0 = T0 - b / (2 * a);
+    return sampleRate / T0;
+  }
+
+  function readPitch() {
+    if (!analyser) return -1;
+    analyser.getFloatTimeDomainData(micBuffer);
+    return autoCorrelate(micBuffer, audioCtx.sampleRate);
+  }
+
+  function startCalibration() {
+    calibrating = true;
+    calibSamples = [];
+    pitchLblEl.textContent = 'calibrating…';
+    setTimeout(() => {
+      calibrating = false;
+      if (calibSamples.length > 5) {
+        calibSamples.sort((a, b) => a - b);
+        baselineHz = calibSamples[Math.floor(calibSamples.length / 2)];
+      }
+      baselineHz = Math.max(85, Math.min(280, baselineHz));
+      pitchLblEl.textContent = '🎤 mic';
+    }, 1200);
+  }
+
+  // ---------- Camera ----------
+  async function startCamera() {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false,
+    });
+    camEl.srcObject = stream;
+    await camEl.play().catch(() => {});
+  }
+
+  // ---------- Track geometry ----------
+  const TRACK = {
+    horizonY: () => H * 0.22,
+    nearY:    () => H * 0.92,
+    horizonHalfW: () => Math.min(W, H) * 0.06,
+    nearHalfW:    () => Math.min(W, H) * 0.42,
+    cowZ: 0.12,
+  };
+  function zToY(z) { const t = 1 - z; return TRACK.horizonY() + t * (TRACK.nearY() - TRACK.horizonY()); }
+  function zToHalfWidth(z) { const t = 1 - z; return TRACK.horizonHalfW() + t * (TRACK.nearHalfW() - TRACK.horizonHalfW()); }
+  function zToScale(z) { const t = 1 - z; return 0.18 + t * 0.95; }
+
+  function drawTrack() {
+    const cx = W / 2;
+    const hY = TRACK.horizonY(), nY = TRACK.nearY();
+    const hHW = TRACK.horizonHalfW(), nHW = TRACK.nearHalfW();
+    ctx.beginPath();
+    ctx.moveTo(cx - hHW, hY); ctx.lineTo(cx + hHW, hY);
+    ctx.lineTo(cx + nHW, nY); ctx.lineTo(cx - nHW, nY);
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(0, hY, 0, nY);
+    grad.addColorStop(0, '#6abf69'); grad.addColorStop(1, '#2e7d32');
+    ctx.fillStyle = grad; ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 2; ctx.stroke();
+
+    // motion stripes
+    const stripes = 14;
+    const offset = (game.elapsed * 0.6) % 1;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(cx - hHW, hY); ctx.lineTo(cx + hHW, hY);
+    ctx.lineTo(cx + nHW, nY); ctx.lineTo(cx - nHW, nY);
+    ctx.closePath();
+    ctx.clip();
+    for (let i = 0; i < stripes; i++) {
+      const z = ((i / stripes) + offset) % 1;
+      const y = zToY(z), hw = zToHalfWidth(z);
+      const nz = ((i + 1) / stripes + offset) % 1;
+      const ny = zToY(nz), nhw = zToHalfWidth(nz);
+      ctx.fillStyle = i % 2 === 0 ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.06)';
+      ctx.beginPath();
+      ctx.moveTo(cx - hw, y); ctx.lineTo(cx + hw, y);
+      ctx.lineTo(cx + nhw, ny); ctx.lineTo(cx - nhw, ny);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawSideFences() {
+    const posts = 10;
+    const offset = (game.elapsed * 0.6) % 1;
+    for (let i = 0; i < posts; i++) {
+      const z = ((i / posts) + offset) % 1;
+      drawPost(z, -1); drawPost(z, +1);
+    }
+  }
+  function drawPost(z, side) {
+    const cx = W / 2;
+    const y = zToY(z), hw = zToHalfWidth(z), sc = zToScale(z);
+    const x = cx + side * (hw + 6 * sc);
+    const w = 8 * sc, h = 30 * sc;
+    ctx.fillStyle = '#8b5a2b'; ctx.fillRect(x - w / 2, y - h, w, h);
+    ctx.fillStyle = '#5d3a1a'; ctx.fillRect(x - w / 2, y - 4 * sc, w, 4 * sc);
+  }
+
+  // ---------- Cow drawing (color-aware + collision flash) ----------
+  function drawCow() {
+    const c = game.cow;
+    const palette = COW_COLORS[game.cowColorKey] || COW_COLORS.classic;
+    const z = TRACK.cowZ;
+    const baseY = zToY(z);
+    const sc = zToScale(z) * 1.0;
+    const jumpY = c.jumping ? Math.sin(c.jumpTime * Math.PI) * 90 * sc : 0;
+    const duckSquish = c.ducking ? 0.65 : 1.0;
+    const cx = W / 2;
+    const cy = baseY - jumpY - 28 * sc * duckSquish;
+
+    // collision red glow
+    const flashing = state === STATE.HIT;
+    if (flashing) {
+      const flashAmt = 0.5 + 0.5 * Math.sin(game.hitTime * 25);
+      ctx.save();
+      ctx.shadowColor = `rgba(255,40,40,${0.8 * flashAmt + 0.2})`;
+      ctx.shadowBlur = 30;
+    }
+
+    // shadow on the ground
+    ctx.fillStyle = `rgba(0,0,0,${0.35 - jumpY / 400})`;
+    ctx.beginPath();
+    ctx.ellipse(cx, baseY + 4 * sc, 50 * sc, 10 * sc, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // legs
+    const phase = c.runPhase;
+    const legOffset = c.jumping ? 0 : Math.sin(phase) * 6 * sc;
+    drawLeg(cx - 22 * sc, cy + 30 * sc * duckSquish, sc, +legOffset, palette);
+    drawLeg(cx + 22 * sc, cy + 30 * sc * duckSquish, sc, -legOffset, palette);
+    drawLeg(cx - 14 * sc, cy + 28 * sc * duckSquish, sc * 0.9, -legOffset * 0.6, palette);
+    drawLeg(cx + 14 * sc, cy + 28 * sc * duckSquish, sc * 0.9, +legOffset * 0.6, palette);
+
+    // body
+    const bodyW = 90 * sc, bodyH = 60 * sc * duckSquish;
+    const outlineW = flashing ? 4 : 2;
+    const outlineCol = flashing ? '#ff2d2d' : palette.outline;
+    roundRect(cx - bodyW / 2, cy - bodyH / 2, bodyW, bodyH, 22 * sc, palette.body, outlineCol, outlineW);
+    if (palette.spot) {
+      drawSpot(cx - 18 * sc, cy - 4 * sc, 14 * sc, 10 * sc, palette.spot);
+      drawSpot(cx + 22 * sc, cy + 8 * sc, 18 * sc, 12 * sc, palette.spot);
+      drawSpot(cx + 4 * sc,  cy - 14 * sc * duckSquish, 10 * sc, 7 * sc, palette.spot);
+      drawSpot(cx - 30 * sc, cy + 16 * sc * duckSquish, 10 * sc, 7 * sc, palette.spot);
+    }
+
+    // tail
+    ctx.strokeStyle = palette.tail;
+    ctx.lineWidth = 3 * sc;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - bodyH / 2);
+    ctx.quadraticCurveTo(
+      cx + Math.sin(phase * 0.8) * 14 * sc,
+      cy - bodyH / 2 - 18 * sc,
+      cx - 6 * sc + Math.sin(phase) * 8 * sc,
+      cy - bodyH / 2 - 22 * sc
+    );
+    ctx.stroke();
+    ctx.fillStyle = palette.tail;
+    const tx = cx - 6 * sc + Math.sin(phase) * 8 * sc;
+    const ty = cy - bodyH / 2 - 22 * sc;
+    ctx.beginPath();
+    ctx.ellipse(tx, ty, 4 * sc, 5 * sc, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // head
+    const headY = cy - bodyH / 2 - 4 * sc;
+    roundRect(cx - 22 * sc, headY - 30 * sc, 44 * sc, 34 * sc, 14 * sc, palette.body, outlineCol, outlineW);
+    // ears
+    ctx.fillStyle = palette.body;
+    ctx.strokeStyle = outlineCol;
+    ctx.lineWidth = 2;
+    ear(cx - 24 * sc, headY - 24 * sc, -1, sc);
+    ear(cx + 24 * sc, headY - 24 * sc, +1, sc);
+    // horns
+    ctx.strokeStyle = '#d6c08b'; ctx.lineWidth = 3 * sc;
+    ctx.beginPath();
+    ctx.moveTo(cx - 10 * sc, headY - 28 * sc);
+    ctx.quadraticCurveTo(cx - 14 * sc, headY - 36 * sc, cx - 6 * sc, headY - 36 * sc);
+    ctx.moveTo(cx + 10 * sc, headY - 28 * sc);
+    ctx.quadraticCurveTo(cx + 14 * sc, headY - 36 * sc, cx + 6 * sc, headY - 36 * sc);
+    ctx.stroke();
+
+    if (flashing) ctx.restore();
+  }
+  function drawLeg(x, y, sc, swing, palette) {
+    ctx.fillStyle = palette.body;
+    ctx.strokeStyle = (state === STATE.HIT) ? '#ff2d2d' : palette.outline;
+    ctx.lineWidth = (state === STATE.HIT) ? 3 : 2;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x - 6 * sc, y, 12 * sc, 22 * sc + swing, 4);
+    else ctx.rect(x - 6 * sc, y, 12 * sc, 22 * sc + swing);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#222';
+    ctx.fillRect(x - 6 * sc, y + 18 * sc + swing, 12 * sc, 5 * sc);
+  }
+  function drawSpot(x, y, rx, ry, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  function ear(x, y, side, sc) {
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.quadraticCurveTo(x + side * 14 * sc, y - 4 * sc, x + side * 10 * sc, y + 8 * sc);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+  }
+  function roundRect(x, y, w, h, r, fill, stroke, lw) {
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, r);
+    else {
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y,     x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x,     y + h, r);
+      ctx.arcTo(x,     y + h, x,     y,     r);
+      ctx.arcTo(x,     y,     x + w, y,     r);
+      ctx.closePath();
+    }
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw || 1; ctx.stroke(); }
+  }
+
+  // ---------- Obstacles ----------
+  function spawnObstacle() {
+    const type = Math.random() < 0.65 ? 'low' : 'high';
+    game.obstacles.push({ z: 1.0, type, cleared: false });
+  }
+  function drawObstacle(o) {
+    const cx = W / 2;
+    const y = zToY(o.z), hw = zToHalfWidth(o.z), sc = zToScale(o.z);
+    if (o.type === 'low') {
+      const barH = 22 * sc, gap = 10 * sc;
+      drawWoodPost(cx - hw + 4 * sc, y - barH - gap, 6 * sc, barH + gap);
+      drawWoodPost(cx + hw - 4 * sc, y - barH - gap, 6 * sc, barH + gap);
+      ctx.fillStyle = '#a0522d'; ctx.fillRect(cx - hw + 2 * sc, y - barH, hw * 2 - 4 * sc, 8 * sc);
+      ctx.strokeStyle = '#5d3a1a'; ctx.lineWidth = 1.5;
+      ctx.strokeRect(cx - hw + 2 * sc, y - barH, hw * 2 - 4 * sc, 8 * sc);
+    } else {
+      const beamY = y - 110 * sc, beamH = 10 * sc;
+      drawWoodPost(cx - hw + 4 * sc, beamY, 6 * sc, (y - beamY));
+      drawWoodPost(cx + hw - 4 * sc, beamY, 6 * sc, (y - beamY));
+      ctx.fillStyle = '#8b4a1f'; ctx.fillRect(cx - hw + 2 * sc, beamY, hw * 2 - 4 * sc, beamH);
+      ctx.strokeStyle = '#4d2a10'; ctx.lineWidth = 1.5;
+      ctx.strokeRect(cx - hw + 2 * sc, beamY, hw * 2 - 4 * sc, beamH);
+      ctx.fillStyle = '#82b1ff';
+      ctx.beginPath();
+      ctx.moveTo(cx - 12 * sc, beamY - 2 * sc);
+      ctx.lineTo(cx + 12 * sc, beamY - 8 * sc);
+      ctx.lineTo(cx - 12 * sc, beamY - 14 * sc);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+  function drawWoodPost(x, y, w, h) {
+    ctx.fillStyle = '#8b5a2b'; ctx.fillRect(x - w / 2, y, w, h);
+    ctx.fillStyle = '#5d3a1a'; ctx.fillRect(x - w / 2, y + h - 3, w, 3);
+  }
+
+  // ---------- Game loop ----------
+  let last = performance.now();
+  function tick(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    if (state === STATE.PLAY) update(dt);
+    else if (state === STATE.HIT) updateHit(dt);
+    draw();
+    requestAnimationFrame(tick);
+  }
+
+  function updateHit(dt) {
+    game.hitTime += dt;
+    // keep cow run animation paused, keep world moving slowly for drama
+    game.elapsed += dt * 0.3;
+    if (game.hitTime >= 0.45) {
+      goToGameOver();
+    }
+  }
+
+  function update(dt) {
+    game.elapsed += dt;
+    game.cow.runPhase += dt * 12;
+    game.speed = 0.35 + Math.min(0.6, game.elapsed * 0.012);
+    game.spawnInterval = Math.max(0.85, 1.7 - game.elapsed * 0.015);
+
+    let hz = readPitch();
+    voiceActive = hz > 0;
+    if (calibrating && hz > 60 && hz < 600) calibSamples.push(hz);
+
+    let deviationSemi = 0;
+    if (hz > 0) deviationSemi = 12 * Math.log2(hz / baselineHz);
+    const target = Math.max(-1, Math.min(1, deviationSemi / 5));
+    pitchSmooth = pitchSmooth * 0.6 + target * 0.4;
+
+    const pct = Math.abs(pitchSmooth) * 50;
+    const dirRight = pitchSmooth > 0;
+    pitchBarEl.style.left  = dirRight ? '50%' : (50 - pct) + '%';
+    pitchBarEl.style.width = pct + '%';
+    pitchBarEl.style.background = dirRight ? 'var(--good)' : '#82b1ff';
+    pitchHzEl.textContent = hz > 0 ? hz.toFixed(0) + ' Hz' : '—';
+
+    const c = game.cow;
+    const HIGH_TRIGGER = 0.45;
+    const LOW_TRIGGER  = -0.45;
+    if (!c.jumping && !c.ducking && voiceActive) {
+      if (pitchSmooth > HIGH_TRIGGER) { c.jumping = true; c.jumpTime = 0; }
+      else if (pitchSmooth < LOW_TRIGGER) { c.ducking = true; c.duckTime = 0; }
+    }
+    if (c.jumping) { c.jumpTime += dt / 0.7; if (c.jumpTime >= 1) { c.jumping = false; c.jumpTime = 0; } }
+    if (c.ducking) { c.duckTime += dt / 0.6; if (c.duckTime >= 1) { c.ducking = false; c.duckTime = 0; } }
+
+    game.spawnTimer += dt;
+    if (game.spawnTimer >= game.spawnInterval) { game.spawnTimer = 0; spawnObstacle(); }
+
+    for (const o of game.obstacles) o.z -= game.speed * dt;
+
+    for (const o of game.obstacles) {
+      if (!o.cleared && Math.abs(o.z - TRACK.cowZ) < 0.04) {
+        let safe = false;
+        if (o.type === 'low'  && c.jumping  && c.jumpTime > 0.15 && c.jumpTime < 0.85) safe = true;
+        if (o.type === 'high' && c.ducking) safe = true;
+        if (safe) {
+          o.cleared = true;
+          game.score++;
+          scoreEl.textContent = game.score;
+        } else if (o.z < TRACK.cowZ - 0.02) {
+          triggerCollision();
+          return;
+        }
+      }
+    }
+    game.obstacles = game.obstacles.filter(o => o.z > -0.1);
+  }
+
+  function triggerCollision() {
+    state = STATE.HIT;
+    game.hitTime = 0;
+    // stop the cow's jump/duck so red outline reads clearly
+    game.cow.jumping = false;
+    game.cow.ducking = false;
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    drawTrack();
+    drawSideFences();
+    const obs = game.obstacles.slice().sort((a, b) => b.z - a.z);
+    for (const o of obs) if (o.z >= TRACK.cowZ) drawObstacle(o);
+    drawCow();
+    for (const o of obs) if (o.z < TRACK.cowZ) drawObstacle(o);
+  }
+
+  // ---------- Lifecycle ----------
+  function resetGame() {
+    game.obstacles = [];
+    game.spawnTimer = 0;
+    game.spawnInterval = 1.6;
+    game.score = 0;
+    game.elapsed = 0;
+    game.hitTime = 0;
+    game.speed = 0.35;
+    game.cow.jumping = false;
+    game.cow.ducking = false;
+    game.cow.jumpTime = 0;
+    game.cow.duckTime = 0;
+    scoreEl.textContent = '0';
+  }
+
+  async function goToGameOver() {
+    state = STATE.OVER;
+    finalScore.textContent = game.score;
+    gameOverEl.classList.remove('hidden');
+    // Save score & refresh leaderboard
+    saveStatus.className = '';
+    saveStatus.textContent = '';
+    if (sb) {
+      saveStatus.textContent = 'Saving score…';
+      try {
+        const { error } = await sb.from('leaderboard').insert({
+          username: game.username || 'anonymous',
+          score: game.score,
+          cow_color: game.cowColorKey,
+        });
+        if (error) throw error;
+        saveStatus.textContent = 'Score saved ✓';
+        saveStatus.className = 'ok';
+      } catch (e) {
+        console.error(e);
+        saveStatus.textContent = 'Couldn’t save score: ' + (e.message || e);
+        saveStatus.className = 'err';
+      }
+    } else {
+      saveStatus.textContent = 'Supabase not configured — score not saved.';
+    }
+    await refreshLeaderboard(lbEnd);
+  }
+
+  async function refreshLeaderboard(targetEl) {
+    if (!sb) {
+      targetEl.innerHTML = '<li class="lb-empty">Set up Supabase to enable the leaderboard.</li>';
+      return;
+    }
+    targetEl.innerHTML = '<li class="lb-empty">Loading…</li>';
+    try {
+      const { data, error } = await sb
+        .from('leaderboard')
+        .select('username, score, cow_color')
+        .order('score', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(5);
+      if (error) throw error;
+      if (!data || data.length === 0) {
+        targetEl.innerHTML = '<li class="lb-empty">No scores yet — be the first!</li>';
+        return;
+      }
+      const html = data.map((row, i) => {
+        const rank = i + 1;
+        const palette = COW_COLORS[row.cow_color] || COW_COLORS.classic;
+        const safeName = (row.username || 'anonymous')
+          .replace(/[<>&"']/g, ch => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[ch]));
+        return `
+          <li class="lb-row">
+            <span class="lb-rank r${rank}">#${rank}</span>
+            <span class="lb-cow" style="background:${palette.body}"></span>
+            <span class="lb-name">${safeName}</span>
+            <span class="lb-score">${row.score}</span>
+          </li>
+        `;
+      }).join('');
+      targetEl.innerHTML = html;
+    } catch (e) {
+      console.error(e);
+      targetEl.innerHTML = `<li class="lb-empty">Could not load leaderboard.</li>`;
+    }
+  }
+
+  async function beginGame() {
+    permErr.textContent = '';
+    const name = (usernameInput.value || '').trim();
+    if (!name) {
+      permErr.textContent = 'Please enter a name first.';
+      usernameInput.focus();
+      return;
+    }
+    game.username = name;
+    game.cowColorKey = selectedColor;
+    savePrefs(name, selectedColor);
+
+    // HUD player tag
+    playerTag.style.display = 'inline-flex';
+    playerName.textContent = name;
+    playerDot.style.background = COW_COLORS[selectedColor].body;
+
+    try { await startCamera(); }
+    catch (e) { permErr.textContent = 'Camera permission denied — game still works without it.'; }
+    try { await startMic(); }
+    catch (e) {
+      permErr.textContent = 'Mic permission is required to control the cow with your voice.';
+      return;
+    }
+    startScreen.classList.add('hidden');
+    gameOverEl.classList.add('hidden');
+    resetGame();
+    state = STATE.PLAY;
+    startCalibration();
+  }
+
+  function backToStart() {
+    state = STATE.INTRO;
+    gameOverEl.classList.add('hidden');
+    startScreen.classList.remove('hidden');
+    refreshLeaderboard(lbStart);
+  }
+
+  startBtn.addEventListener('click', beginGame);
+  restartBtn.addEventListener('click', beginGame);
+  backToStartBtn.addEventListener('click', backToStart);
+
+  // Keyboard fallback
+  window.addEventListener('keydown', (e) => {
+    if (state !== STATE.PLAY) return;
+    const c = game.cow;
+    if ((e.code === 'Space' || e.code === 'ArrowUp') && !c.jumping && !c.ducking) { c.jumping = true; c.jumpTime = 0; }
+    else if (e.code === 'ArrowDown' && !c.jumping && !c.ducking) { c.ducking = true; c.duckTime = 0; }
+  });
+  // Tap fallback (top half = jump, bottom half = duck)
+  document.addEventListener('pointerdown', (e) => {
+    if (state !== STATE.PLAY) return;
+    if (e.target.closest('button') || e.target.closest('input') || e.target.closest('.swatch')) return;
+    const c = game.cow;
+    if (c.jumping || c.ducking) return;
+    if (e.clientY < H / 2) { c.jumping = true; c.jumpTime = 0; }
+    else { c.ducking = true; c.duckTime = 0; }
+  }, { passive: true });
+
+  // ---------- Boot ----------
+  const prefs = loadPrefs();
+  selectedColor = prefs.cowColor;
+  buildColorPicker();
+  refreshLeaderboard(lbStart);
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
