@@ -524,6 +524,9 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
   }
 
   // ---------- Resize / DPR ----------
+  // (renderer/camera are declared here so resize() can reference them safely
+  //  during its initial pre-three.js call.)
+  let renderer = null, scene = null, camera = null;
   let W = 0, H = 0, DPR = Math.min(window.devicePixelRatio || 1, 2);
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -660,7 +663,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
   }
 
   // ---------- three.js scene ----------
-  let renderer = null, scene = null, camera = null;
+  // (renderer/scene/camera are declared up by resize() — see note there.)
   let groundTex = null, groundMesh = null;
   const FENCE_TILES_PER_SIDE = 14;
   const FENCE_TILE_SPACING = 2.2;
