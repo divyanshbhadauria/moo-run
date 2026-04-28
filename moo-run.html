@@ -761,6 +761,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
   }
 
   // Cow faces -Z (away from camera). Camera sits at +Z, sees its back.
+  // Built from rounded primitives (spheres, capsules) to avoid a blocky look.
   function buildCow(palette) {
     const grp = new THREE.Group();
     const bodyMat = new THREE.MeshLambertMaterial({ color: palette.body });
@@ -769,92 +770,115 @@ const SUPABASE_ANON_KEY = 'sb_publishable_Sq6gOLdCrHICBVK3b0anwA_JWpkMm8T';
     const hoofMat = new THREE.MeshLambertMaterial({ color: 0x222222 });
     const eyeMat  = new THREE.MeshBasicMaterial({ color: 0x000000 });
     const snoutMat = new THREE.MeshLambertMaterial({ color: 0xf2c4ae });
-    const flashMaterials = [bodyMat, tailMat]; // pulse these red on hit
+    const flashMaterials = [bodyMat, tailMat];
 
-    // Body
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.45, 0.85), bodyMat);
-    body.position.y = 0.55;
+    // Body — stretched sphere, slightly squashed vertically.
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.30, 24, 18), bodyMat);
+    body.scale.set(1.05, 0.85, 1.50);
+    body.position.y = 0.58;
     grp.add(body);
 
-    // Spots — small flat boxes glued to body sides
+    // Spots — flattened ellipsoids that sit on the body surface.
     if (palette.spot) {
       const spotMat = new THREE.MeshLambertMaterial({ color: palette.spot });
       flashMaterials.push(spotMat);
-      const spotPositions = [
-        [-0.28, 0.65,  0.10, 0.20, 0.18, 0.04],
-        [ 0.28, 0.50, -0.10, 0.22, 0.20, 0.04],
-        [-0.10, 0.78,  0.20, 0.24, 0.04, 0.18],
-        [ 0.18, 0.78, -0.20, 0.20, 0.04, 0.18],
-        [ 0.05, 0.55,  0.32, 0.15, 0.10, 0.04],
+      // [x, y, z, scaleX, scaleY, scaleZ]
+      const spots = [
+        [-0.26, 0.62,  0.05, 0.45, 0.40, 0.55],   // left rear flank
+        [ 0.27, 0.50, -0.10, 0.50, 0.45, 0.55],   // right side
+        [-0.05, 0.78,  0.18, 0.60, 0.30, 0.55],   // top-back
+        [ 0.10, 0.78, -0.20, 0.50, 0.30, 0.50],   // top-front
+        [ 0.04, 0.55,  0.36, 0.40, 0.40, 0.30],   // rump
       ];
-      for (const [x, y, z, sx, sy, sz] of spotPositions) {
-        const s = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), spotMat);
+      const baseSpot = new THREE.SphereGeometry(0.16, 16, 12);
+      for (const [x, y, z, sx, sy, sz] of spots) {
+        const s = new THREE.Mesh(baseSpot, spotMat);
         s.position.set(x, y, z);
+        s.scale.set(sx, sy, sz);
         grp.add(s);
       }
     }
 
-    // Head (forward = -Z)
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.36, 0.40), bodyMat);
-    head.position.set(0, 0.78, -0.55);
+    // Head — rounded, slightly oval.
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 20, 16), bodyMat);
+    head.scale.set(1.0, 0.95, 1.05);
+    head.position.set(0, 0.80, -0.55);
     grp.add(head);
 
-    // Snout
-    const snout = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.22, 0.18), snoutMat);
-    snout.position.set(0, 0.66, -0.78);
+    // Snout — soft little muzzle pushed forward.
+    const snout = new THREE.Mesh(new THREE.SphereGeometry(0.14, 16, 12), snoutMat);
+    snout.scale.set(1.0, 0.85, 0.75);
+    snout.position.set(0, 0.69, -0.78);
     grp.add(snout);
+    // Two nostrils (tiny dark dots) for personality.
+    const nostrilGeom = new THREE.SphereGeometry(0.018, 8, 8);
+    const nL = new THREE.Mesh(nostrilGeom, eyeMat); nL.position.set(-0.04, 0.69, -0.88);
+    const nR = new THREE.Mesh(nostrilGeom, eyeMat); nR.position.set( 0.04, 0.69, -0.88);
+    grp.add(nL, nR);
 
     // Eyes
-    const eyeGeom = new THREE.SphereGeometry(0.04, 8, 8);
-    const eyeL = new THREE.Mesh(eyeGeom, eyeMat); eyeL.position.set(-0.10, 0.84, -0.74);
-    const eyeR = new THREE.Mesh(eyeGeom, eyeMat); eyeR.position.set( 0.10, 0.84, -0.74);
+    const eyeGeom = new THREE.SphereGeometry(0.04, 10, 8);
+    const eyeL = new THREE.Mesh(eyeGeom, eyeMat); eyeL.position.set(-0.10, 0.86, -0.72);
+    const eyeR = new THREE.Mesh(eyeGeom, eyeMat); eyeR.position.set( 0.10, 0.86, -0.72);
     grp.add(eyeL, eyeR);
 
-    // Ears
-    const earGeom = new THREE.BoxGeometry(0.14, 0.10, 0.06);
+    // Ears — flattened spheres tilted outward.
+    const earGeom = new THREE.SphereGeometry(0.10, 12, 10);
     const earL = new THREE.Mesh(earGeom, bodyMat);
-    earL.position.set(-0.22, 0.94, -0.55); earL.rotation.z = 0.5;
+    earL.position.set(-0.22, 0.92, -0.52); earL.scale.set(1.4, 0.55, 0.85); earL.rotation.z = 0.55;
     const earR = new THREE.Mesh(earGeom, bodyMat);
-    earR.position.set( 0.22, 0.94, -0.55); earR.rotation.z = -0.5;
+    earR.position.set( 0.22, 0.92, -0.52); earR.scale.set(1.4, 0.55, 0.85); earR.rotation.z = -0.55;
     grp.add(earL, earR);
 
-    // Horns
-    const hornGeom = new THREE.CylinderGeometry(0.025, 0.05, 0.18, 6);
+    // Horns — tapered cylinders with rounded sphere tips.
+    const hornGeom = new THREE.CylinderGeometry(0.020, 0.045, 0.18, 10);
+    const hornTipGeom = new THREE.SphereGeometry(0.022, 8, 6);
     const hornL = new THREE.Mesh(hornGeom, hornMat);
-    hornL.position.set(-0.13, 1.02, -0.55); hornL.rotation.z = 0.35;
+    hornL.position.set(-0.12, 1.02, -0.55); hornL.rotation.z = 0.35;
     const hornR = new THREE.Mesh(hornGeom, hornMat);
-    hornR.position.set( 0.13, 1.02, -0.55); hornR.rotation.z = -0.35;
-    grp.add(hornL, hornR);
+    hornR.position.set( 0.12, 1.02, -0.55); hornR.rotation.z = -0.35;
+    const hornTL = new THREE.Mesh(hornTipGeom, hornMat);
+    hornTL.position.set(-0.16, 1.10, -0.55);
+    const hornTR = new THREE.Mesh(hornTipGeom, hornMat);
+    hornTR.position.set( 0.16, 1.10, -0.55);
+    grp.add(hornL, hornR, hornTL, hornTR);
 
-    // Legs (with hoof at the bottom). Legs are pivoted at top so swinging
-    // rotates them about the shoulder/hip rather than the foot.
+    // Legs — capsules pivoted at the shoulder/hip so they swing as one piece.
     const legs = [];
     const legPositions = [
-      [-0.18,  0.30],  // back-left
-      [ 0.18,  0.30],  // back-right
-      [-0.18, -0.30],  // front-left
-      [ 0.18, -0.30],  // front-right
+      [-0.17,  0.28],  // back-left
+      [ 0.17,  0.28],  // back-right
+      [-0.17, -0.28],  // front-left
+      [ 0.17, -0.28],  // front-right
     ];
+    const legGeom = THREE.CapsuleGeometry
+      ? new THREE.CapsuleGeometry(0.07, 0.30, 6, 12)
+      : new THREE.CylinderGeometry(0.07, 0.07, 0.44, 12);
+    const hoofGeom = new THREE.SphereGeometry(0.085, 12, 10);
     for (const [x, z] of legPositions) {
       const pivot = new THREE.Group();
-      pivot.position.set(x, 0.45, z);
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.45, 0.10), bodyMat);
-      leg.position.y = -0.225;
+      pivot.position.set(x, 0.46, z);
+      const leg = new THREE.Mesh(legGeom, bodyMat);
+      leg.position.y = -0.22;
       pivot.add(leg);
-      const hoof = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.06, 0.13), hoofMat);
-      hoof.position.y = -0.45;
+      const hoof = new THREE.Mesh(hoofGeom, hoofMat);
+      hoof.position.y = -0.44;
+      hoof.scale.set(1.0, 0.55, 1.0);
       pivot.add(hoof);
       grp.add(pivot);
       legs.push(pivot);
     }
 
-    // Tail
-    const tail = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.32, 6), tailMat);
-    tail.position.set(0, 0.65, 0.45);
-    tail.rotation.x = 0.4;
+    // Tail — slim capsule with a sphere tuft.
+    const tailGeom = THREE.CapsuleGeometry
+      ? new THREE.CapsuleGeometry(0.022, 0.28, 4, 8)
+      : new THREE.CylinderGeometry(0.022, 0.022, 0.32, 8);
+    const tail = new THREE.Mesh(tailGeom, tailMat);
+    tail.position.set(0, 0.62, 0.46);
+    tail.rotation.x = 0.5;
     grp.add(tail);
-    const tailTip = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), tailMat);
-    tailTip.position.set(0, 0.50, 0.58);
+    const tailTip = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 10), tailMat);
+    tailTip.position.set(0, 0.46, 0.60);
     grp.add(tailTip);
 
     return { group: grp, legs, flashMaterials };
